@@ -816,12 +816,15 @@ function meterAbstand(a,b){
   return Math.sqrt(dφ*dφ + x*x)*R;
 }
 
-async function gleiseHolen(a,b){
-  const puffer=Math.max(0.02, Math.abs(a[0]-b[0])*0.35, Math.abs(a[1]-b[1])*0.35);
+async function gleiseHolen(a,b,weite){
+  const f=weite||1;
+  const puffer=Math.max(0.025, Math.abs(a[0]-b[0])*0.4, Math.abs(a[1]-b[1])*0.4)*f;
   const s=Math.min(a[0],b[0])-puffer, n=Math.max(a[0],b[0])+puffer;
   const w=Math.min(a[1],b[1])-puffer, e=Math.max(a[1],b[1])+puffer;
-  const q=`[out:json][timeout:90];way["railway"~"^(rail|light_rail|narrow_gauge)$"]`
-        + `["service"!~"."]["railway"!="abandoned"](${s},${w},${n},${e});out geom;`;
+  /* Alle befahrbaren Gleise, auch Bahnhofs- und Verbindungsgleise —
+     sonst reisst der Weg genau in den Bahnhöfen ab. */
+  const q=`[out:json][timeout:120];way["railway"~"^(rail|light_rail|narrow_gauge)$"]`
+        + `(${s},${w},${n},${e});out body;>;out skel qt;`;
   const server=['https://overpass-api.de/api/interpreter',
                 'https://overpass.kumi.systems/api/interpreter'];
   let letzter='';
@@ -836,19 +839,22 @@ async function gleiseHolen(a,b){
   throw new Error(letzter||'Gleisdaten nicht erreichbar');
 }
 
-function graphBauen(ways){
+function graphBauen(elemente){
+  const roh=new Map();
+  elemente.forEach(e=>{ if(e.type==='node') roh.set(e.id,{lat:e.lat,lon:e.lon}); });
   const G=new Map();
-  const key=p=>p.lat.toFixed(6)+','+p.lon.toFixed(6);
-  const kante=(k1,p1,k2,p2)=>{
-    if(!G.has(k1)) G.set(k1,{lat:p1.lat,lon:p1.lon,n:[]});
-    G.get(k1).n.push([k2, meterAbstand([p1.lat,p1.lon],[p2.lat,p2.lon])]);
+  const hole=id=>{
+    if(!G.has(id)){ const k=roh.get(id); if(!k) return null; G.set(id,{lat:k.lat,lon:k.lon,n:[]}); }
+    return G.get(id);
   };
-  ways.forEach(w=>{
-    const g=w.geometry||[];
-    for(let i=1;i<g.length;i++){
-      const a=g[i-1], b=g[i], ka=key(a), kb=key(b);
-      if(ka===kb) continue;
-      kante(ka,a,kb,b); kante(kb,b,ka,a);
+  elemente.forEach(e=>{
+    if(e.type!=='way' || !e.nodes) return;
+    for(let i=1;i<e.nodes.length;i++){
+      const A=hole(e.nodes[i-1]), B=hole(e.nodes[i]);
+      if(!A||!B||e.nodes[i-1]===e.nodes[i]) continue;
+      const d=meterAbstand([A.lat,A.lon],[B.lat,B.lon]);
+      A.n.push([e.nodes[i], d]);
+      B.n.push([e.nodes[i-1], d]);
     }
   });
   return G;
@@ -924,14 +930,24 @@ async function verlaufErmitteln(st){
   for(let i=1;i<pkte.length;i++){
     if(meterAbstand(pkte[i-1],pkte[i])>80000)
       throw new Error('Abschnitt zu lang — Zwischenbetriebspunkte erfassen');
-    meldung(`${st.name}: Gleise Abschnitt ${i} von ${pkte.length-1} …`);
-    const ways=await gleiseHolen(pkte[i-1],pkte[i]);
-    if(!ways.length) throw new Error('Keine Gleisdaten in diesem Bereich');
-    const G=graphBauen(ways);
-    const a=naechsterKnoten(G,pkte[i-1]), b=naechsterKnoten(G,pkte[i]);
-    if(a.d>900 || b.d>900) throw new Error('Betriebspunkt liegt zu weit vom Gleis — Koordinate prüfen');
-    const teil=kuerzesterWeg(G,a.k,b.k);
-    if(!teil) throw new Error('Keine durchgehende Gleisverbindung gefunden');
+    let teil=null, grund='', versuch=0;
+    while(!teil && versuch<2){
+      versuch++;
+      meldung(`${st.name}: Abschnitt ${i} von ${pkte.length-1}${versuch>1?' — grösserer Ausschnitt':''} …`);
+      const elemente=await gleiseHolen(pkte[i-1], pkte[i], versuch===1?1:2.4);
+      if(!elemente.length){ grund='Keine Gleisdaten in diesem Bereich'; }
+      else {
+        const G=graphBauen(elemente);
+        const a=naechsterKnoten(G,pkte[i-1]), b=naechsterKnoten(G,pkte[i]);
+        if(a.d>1500 || b.d>1500) grund='Betriebspunkt liegt '+Math.round(Math.max(a.d,b.d))+' m vom nächsten Gleis — Koordinate prüfen';
+        else {
+          teil=kuerzesterWeg(G,a.k,b.k);
+          if(!teil) grund='Keine durchgehende Gleisverbindung gefunden';
+        }
+      }
+      if(!teil && versuch<2) await new Promise(r=>setTimeout(r,1300));
+    }
+    if(!teil) throw new Error(grund+' (Abschnitt '+i+')');
     gesamt = gesamt.length ? gesamt.concat(teil.slice(1)) : teil;
     if(i<pkte.length-1) await new Promise(r=>setTimeout(r,1100));
   }
