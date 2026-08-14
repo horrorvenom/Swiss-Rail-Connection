@@ -246,8 +246,9 @@ let S = {
 };
 let ANSICHT='uebersicht', SUCHE='', FILTER='alle', JOURNAL='fahrten',
     TEAMMODUS='mitarbeiter', ENTWURF=null, TORMODUS='anmelden';
+let STRECKE_ZURUECK=null;
 let KARTE=null, KARTENSICHT={center:[46.82,8.23], zoom:8},
-    KARTENMODUS='ansehen', KARTENZIEL='', VERLAUF=[];
+    KARTENMODUS='ansehen', KARTENZIEL='', VERLAUF=[], KARTENPERSON='';
 
 /* ---------- Werkzeuge ---------- */
 const $ = id => document.getElementById(id);
@@ -575,6 +576,22 @@ function ansichtTeam(){
    Karte
    ============================================================ */
 function hatKoord(p){ return p && p.lat!=null && p.lon!=null; }
+
+/* Karte zeigt entweder den eigenen Stand oder — für Administratoren —
+   den einer ausgewählten Person aus der Auswertung. */
+function fremdZeile(art,id){
+  return S.teamStand.find(r=>r.benutzer_id===KARTENPERSON && r.art===art && r.objekt_id===id);
+}
+function kZustand(art,id){
+  if(!KARTENPERSON) return art==='strecke'?zustandS(id):zustandA(id);
+  const r=fremdZeile(art,id);
+  return r?r.zustand:'keine';
+}
+function kAblauf(art,id){
+  if(!KARTENPERSON) return art==='strecke'?ablaufS(id):ablaufA(id);
+  const r=fremdZeile(art,id);
+  return r&&r.ablauf?String(r.ablauf).slice(0,10):'';
+}
 function darfStamm(o){ return istAdmin() || (o && o.erstellt_von===S.user.id); }
 
 function streckenGeometrie(st){
@@ -610,7 +627,20 @@ function ansichtKarte(){
     ? '<div class="hinweisbalken">«Gleisen folgen lassen» berechnet den Verlauf aus dem Schienennetz von OpenStreetMap — das dauert je Abschnitt einige Sekunden. Von Hand tippen geht auch, etwa wenn kein Gleis erfasst ist.</div>'
     : '';
 
+  const personwahl = istAdmin() && S.teamProfile.length
+    ? `<label style="margin-bottom:9px"><span>Kenntnisstand anzeigen von</span>
+        <select id="k-person">
+          <option value="">Mir selbst</option>
+          ${S.teamProfile.filter(u=>u.id!==S.user.id).map(u=>
+            `<option value="${u.id}"${KARTENPERSON===u.id?' selected':''}>${esc(u.name||'Ohne Namen')}${u.depot?' · '+esc(u.depot):''}</option>`).join('')}
+        </select></label>` : '';
+
   return `
+  ${personwahl}
+  ${KARTENPERSON?`<div class="hinweisbalken" style="border-left-color:var(--warnung)">
+     Fremdansicht — die Einfärbung zeigt den Stand von
+     ${esc((S.teamProfile.find(u=>u.id===KARTENPERSON)||{}).name||'dieser Person')}.
+     Eintragen ist dabei nicht möglich.</div>`:''}
   <div class="chips">
     <button class="chip ${KARTENMODUS==='ansehen'?'an':''}" data-tat="kartenmodus" data-wert="ansehen">Ansehen</button>
     <button class="chip ${KARTENMODUS==='punkt'?'an':''}" data-tat="kartenmodus" data-wert="punkt">Punkt setzen</button>
@@ -679,7 +709,7 @@ function karteAufbauen(){
   S.strecken.forEach(st=>{
     const pfad=streckenGeometrie(st);
     if(pfad.length<2) return;
-    const z=zustandS(st.id), a=ablaufS(st.id);
+    const z=kZustand('strecke',st.id), a=kAblauf('strecke',st.id);
     const teile=[];
     if(st.linie)   teile.push(`<span class="ss-art">Strecke</span> <span class="ss-nr">${esc(st.linie)}</span>`);
     if(st.tabelle) teile.push(`<span class="ss-art">Tabelle</span> <span class="ss-tab">${esc(st.tabelle)}</span>`);
@@ -690,21 +720,21 @@ function karteAufbauen(){
     if(schild) linie.bindTooltip(schild,{ permanent:true, direction:'center',
       className:'streckenschild', opacity:1 });
     linie.bindPopup(`<b>${esc(st.name)}</b><span class="pm">${st.linie?'BAV '+esc(st.linie)+' · ':''}${st.tabelle?'TAB '+esc(st.tabelle)+' · ':''}STRECKE</span>
-       ${ZTEXT[z]}${a?' · bis '+datum(a):''}<br>
+       ${ZTEXT[z]}${a?' · bis '+datum(a):''}${KARTENPERSON?'':`<br>
        <button class="btn klein haupt" data-tat="gefahren" data-id="${st.id}" style="margin-top:8px">Heute gefahren</button>
-       <button class="btn klein" data-tat="kenntnis-s" data-id="${st.id}" style="margin-top:8px">Kenntnis</button>`);
+       <button class="btn klein" data-tat="kenntnis-s" data-id="${st.id}" style="margin-top:8px">Kenntnis</button>`}`);
   });
 
   /* Betriebspunkte */
-  const beweglich = KARTENMODUS==='punkt';
+  const beweglich = KARTENMODUS==='punkt' && !KARTENPERSON;
   S.punkte.filter(hatKoord).forEach(p=>{
-    const z=zustandA(p.id), a=ablaufA(p.id);
+    const z=kZustand('anlage',p.id), a=kAblauf('anlage',p.id);
     const m=L.circleMarker([p.lat,p.lon],{ radius:7, color:'#14181b', weight:2,
       fillColor:ZHEX[z], fillOpacity:1 }).addTo(KARTE);
     m.bindPopup(`<b>${esc(p.name)}</b><span class="pm">${esc(p.abk)} · ${esc(p.typ||'Bahnhof')}</span>
-      ${ZTEXT[z]}${a?' · bis '+datum(a):''}<br>
+      ${ZTEXT[z]}${a?' · bis '+datum(a):''}${KARTENPERSON?'':`<br>
       <button class="btn klein haupt" data-tat="gearbeitet" data-id="${p.id}" style="margin-top:8px">Heute gearbeitet</button>
-      <button class="btn klein" data-tat="kenntnis-a" data-id="${p.id}" style="margin-top:8px">Kenntnis</button>`);
+      <button class="btn klein" data-tat="kenntnis-a" data-id="${p.id}" style="margin-top:8px">Kenntnis</button>`}`);
     if(beweglich && darfStamm(p)){
       const zieh=L.marker([p.lat,p.lon],{ draggable:true, opacity:.35 }).addTo(KARTE);
       zieh.on('dragend', async ev=>{
@@ -963,11 +993,56 @@ function trefferZeigen(liste){
   if(!liste.length){ box.hidden=true; box.innerHTML=''; return; }
   box.hidden=false;
   box.innerHTML=liste.map(t=>`<button type="button" class="vorschlag" data-tat="bp-uebernehmen"
-    data-abk="${esc(t.abk||'')}" data-name="${esc(t.name)}"
+    data-abk="${esc(t.abk||'')}" data-name="${esc(t.name)}" data-typ="${esc(t.typ||'')}"
+    data-bahn="${esc(t.bahn||'')}"
     data-lat="${t.lat!=null?t.lat:''}" data-lon="${t.lon!=null?t.lon:''}">
     <span class="vk">${esc(t.abk||'—')}</span>
-    <span class="vn">${esc(t.name)}</span>
+    <span class="vn">${esc(t.name)}${t.bahn?` <span style="color:var(--stahl);font-size:12px">${esc(t.bahn)}</span>`:''}</span>
     <span class="vq">${esc(t.quelle)}</span></button>`).join('');
+}
+
+const BAHNEN=['SBB','BLS','SOB','zb Zentralbahn','RhB','MGB','TPF','AB Appenzeller Bahnen',
+  'RBS','ASm','MOB','TMR','TRAVYS','WSB','SZU','Forchbahn','DB','ÖBB','SNCF','FS'];
+
+function bahnKuerzen(op){
+  if(!op) return '';
+  const t=String(op);
+  const karte=[[/bundesbahn|SBB|CFF|FFS/i,'SBB'],[/BLS/i,'BLS'],[/Südostbahn|SOB/i,'SOB'],
+    [/Zentralbahn|zb\b/i,'zb'],[/Rhätische|RhB/i,'RhB'],[/Matterhorn|MGB/i,'MGB'],
+    [/Fribourgeois|TPF/i,'TPF'],[/Appenzeller|\bAB\b/i,'AB'],[/Solothurn-Münster|ASm/i,'ASm'],
+    [/Bern-Solothurn|RBS/i,'RBS'],[/Montreux|MOB/i,'MOB'],[/Martigny|TMR/i,'TMR'],
+    [/Sihltal|SZU/i,'SZU'],[/Forch/i,'Forchbahn'],[/TRAVYS/i,'TRAVYS'],[/Aargau Verkehr|WSB|AVA/i,'AVA'],
+    [/Deutsche Bahn|DB /i,'DB'],[/Österreichische|ÖBB/i,'ÖBB'],[/SNCF/i,'SNCF']];
+  for(const [re,kurz] of karte) if(re.test(t)) return kurz;
+  return t.length<=12 ? t : t.slice(0,12);
+}
+const OSM_TYP={station:'Bahnhof', halt:'Haltestelle', junction:'Abzweigung',
+  service_station:'Dienststation', yard:'Abstellanlage', crossover:'Abzweigung'};
+
+async function osmBetriebspunkte(q){
+  const sicher=q.replace(/[\\^$.*+?()[\]{}|"]/g,'.');
+  const query=`[out:json][timeout:40];area["ISO3166-1"="CH"][admin_level=2]->.ch;`
+    + `(node["railway"~"^(station|halt|junction|service_station|yard)$"]["name"~"${sicher}",i](area.ch);`
+    + `way["railway"~"^(station|halt|junction|service_station|yard)$"]["name"~"${sicher}",i](area.ch););`
+    + `out center tags 30;`;
+  const server=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+  for(const url of server){
+    try{
+      const r=await fetch(url,{ method:'POST', body:'data='+encodeURIComponent(query) });
+      if(!r.ok) continue;
+      const j=await r.json();
+      return (j.elements||[]).map(e=>{
+        const t=e.tags||{};
+        const lat=e.lat!=null?e.lat:(e.center&&e.center.lat);
+        const lon=e.lon!=null?e.lon:(e.center&&e.center.lon);
+        if(lat==null||lon==null||!t.name) return null;
+        return { abk:(t['railway:ref']||t.ref||'').trim(), name:t.name.trim(),
+                 typ:OSM_TYP[t.railway]||'Bahnhof', bahn:bahnKuerzen(t.operator),
+                 lat:+lat, lon:+lon, quelle:'OpenStreetMap' };
+      }).filter(Boolean);
+    }catch(e){ /* nächster Server */ }
+  }
+  return [];
 }
 
 async function bpSuchen(q){
@@ -979,6 +1054,17 @@ async function bpSuchen(q){
     .slice(0,6)
     .map(([abk,name,lat,lon])=>({abk,name,lat,lon,quelle:'Verzeichnis'}));
   trefferZeigen(lokal);
+
+  try{
+    const osm=await osmBetriebspunkte(q);
+    const mitAbk=osm.filter(x=>x.abk).sort((a,b)=>a.name.localeCompare(b.name,'de'));
+    const ohneAbk=osm.filter(x=>!x.abk).sort((a,b)=>a.name.localeCompare(b.name,'de'));
+    const bisher=lokal.concat(mitAbk, ohneAbk)
+      .filter((x,i,arr)=>arr.findIndex(y=>y.name.toLowerCase()===x.name.toLowerCase()
+                                       && (y.abk||'')===(x.abk||''))===i);
+    if(bisher.length>lokal.length) trefferZeigen(bisher.slice(0,20));
+    if(bisher.length>=8) return;
+  }catch(e){ /* weiter mit dem amtlichen Verzeichnis */ }
 
   try{
     const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=featuresearch`
@@ -1085,7 +1171,7 @@ function blattOeffnen(titel, inhalt, nachher){
   $('hintergrund').hidden=false; document.body.style.overflow='hidden';
   if(nachher) nachher();
 }
-function blattZu(){ $('hintergrund').hidden=true; document.body.style.overflow=''; ENTWURF=null; }
+function blattZu(){ $('hintergrund').hidden=true; document.body.style.overflow=''; ENTWURF=null; STRECKE_ZURUECK=null; }
 
 function formularKenntnis(art, id){
   const istS = art==='strecke';
@@ -1109,9 +1195,11 @@ function formularKenntnis(art, id){
   `);
 }
 
-function formularStrecke(id){
+function formularStrecke(id, uebernahme){
   const s=id?S.strecken.find(x=>x.id===id):null;
-  ENTWURF=s?{...s,punkte:[...(s.punkte||[])]}:{id:null,name:'',linie:'',tabelle:'',km:'',zugsicherung:'',notiz:'',punkte:[]};
+  ENTWURF = uebernahme
+    || (s?{...s,punkte:[...(s.punkte||[])]}
+         :{id:null,name:'',linie:'',tabelle:'',km:'',zugsicherung:'',notiz:'',punkte:[]});
   blattOeffnen(s?'Strecke bearbeiten':'Strecke erfassen',()=>`
     <div class="hinweis">Strecken sind gemeinsame Stammdaten. Änderungen sehen alle Mitarbeitenden.</div>
     <label><span>Bezeichnung</span><input id="f-name" value="${esc(ENTWURF.name)}" placeholder="Olten – Bern"></label>
@@ -1134,11 +1222,15 @@ function bpAuswahlHtml(){
   const erfasst=S.punkte.slice().sort((a,b)=>a.name.localeCompare(b.name,'de'));
   const offen=STAMM_BP.filter(([abk])=>!S.punkte.some(p=>p.abk===abk))
     .slice().sort((a,b)=>a[1].localeCompare(b[1],'de'));
+  const gruppen={};
+  erfasst.forEach(p=>{ const b=p.bahn||'Ohne Angabe'; (gruppen[b]=gruppen[b]||[]).push(p); });
+  const reihen=Object.keys(gruppen).sort((a,b)=>a==='SBB'?-1:b==='SBB'?1:a.localeCompare(b,'de'));
   return `<option value="">Betriebspunkt hinzufügen …</option>`
-    + (erfasst.length?`<optgroup label="Bereits erfasst">${erfasst.map(p=>
-        `<option value="${p.id}">${esc(p.abk)} — ${esc(p.name)}</option>`).join('')}</optgroup>`:'')
+    + reihen.map(b=>`<optgroup label="Erfasst · ${esc(b)}">${gruppen[b].map(p=>
+        `<option value="${p.id}">${esc(p.abk)} — ${esc(p.name)}</option>`).join('')}</optgroup>`).join('')
     + (offen.length?`<optgroup label="Aus dem Verzeichnis — wird beim Wählen angelegt">${offen.map(([abk,name])=>
-        `<option value="neu:${esc(abk)}">${esc(abk)} — ${esc(name)}</option>`).join('')}</optgroup>`:'');
+        `<option value="neu:${esc(abk)}">${esc(abk)} — ${esc(name)}</option>`).join('')}</optgroup>`:'')
+    + `<optgroup label="Nicht dabei?"><option value="suchen">Betriebspunkt suchen und anlegen …</option></optgroup>`;
 }
 
 function zeichneBpWahl(){
@@ -1162,7 +1254,9 @@ function formularPunkt(id){
       <label><span>Typ</span><select id="p-typ">${typen.map(t=>`<option${ENTWURF.typ===t?' selected':''}>${t}</option>`).join('')}</select></label>
     </div>
     <label><span>Name</span><input id="p-name" value="${esc(ENTWURF.name)}" placeholder="Olten"></label>
-    <label><span>Infrastrukturbetreiberin</span><input id="p-bahn" value="${esc(ENTWURF.bahn)}" placeholder="SBB, BLS, SOB, RhB …"></label>
+    <label><span>Infrastrukturbetreiberin</span>
+      <input id="p-bahn" list="bahnliste" value="${esc(ENTWURF.bahn)}" placeholder="SBB, BLS, SOB, zb, RhB …"></label>
+    <datalist id="bahnliste">${BAHNEN.map(b=>`<option value="${esc(b)}">`).join('')}</datalist>
     <div class="zweispaltig">
       <label><span>Breitengrad</span><input id="p-lat" inputmode="decimal" value="${ENTWURF.lat!=null?ENTWURF.lat:''}" placeholder="47.351900"></label>
       <label><span>Längengrad</span><input id="p-lon" inputmode="decimal" value="${ENTWURF.lon!=null?ENTWURF.lon:''}" placeholder="7.907700"></label>
@@ -1235,7 +1329,9 @@ const TATEN = {
   },
   'abmelden': async ()=>{ await db.auth.signOut(); },
 
-  'nav': e=>{ ANSICHT=e.dataset.wert; SUCHE=''; FILTER='alle'; zeichnen(); window.scrollTo(0,0); },
+  'nav': e=>{ ANSICHT=e.dataset.wert; SUCHE=''; FILTER='alle';
+    if(ANSICHT!=='karte') KARTENPERSON='';
+    zeichnen(); window.scrollTo(0,0); },
   'kartenmodus': e=>{ KARTENMODUS=e.dataset.wert; VERLAUF=[]; zeichnen(); },
   'koordinaten-suchen': async ()=>{
     const offen=S.punkte.filter(p=>!hatKoord(p) && darfStamm(p));
@@ -1387,7 +1483,12 @@ const TATEN = {
   'bp-uebernehmen': e=>{
     const f=(id,v)=>{ const el=$(id); if(el && v!=null && v!=='') el.value=v; };
     f('p-abk', e.dataset.abk); f('p-name', e.dataset.name);
-    f('p-lat', e.dataset.lat); f('p-lon', e.dataset.lon);
+    f('p-lat', e.dataset.lat); f('p-lon', e.dataset.lon); f('p-bahn', e.dataset.bahn);
+    const typ=$('p-typ');
+    if(typ && e.dataset.typ){
+      const opt=[...typ.options].find(o=>o.value===e.dataset.typ||o.text===e.dataset.typ);
+      if(opt) typ.value=opt.value;
+    }
     const box=$('p-treffer'); if(box){ box.hidden=true; box.innerHTML=''; }
     const suche=$('p-suche'); if(suche) suche.value='';
     if(!e.dataset.abk) meldung('Abkürzung noch eintragen — im Verzeichnis nicht hinterlegt');
@@ -1405,6 +1506,14 @@ const TATEN = {
       : await db.from('betriebspunkt').insert(werte);
     if(error) return fehler(error);
     blattZu(); await alleLaden(); zeichnen(); meldung('Anlage gesichert');
+    if(STRECKE_ZURUECK){
+      const neuerPunkt=S.punkte.find(x=>x.abk===abk);
+      const entwurf=STRECKE_ZURUECK; STRECKE_ZURUECK=null;
+      if(neuerPunkt) entwurf.punkte.push(neuerPunkt.id);
+      formularStrecke(entwurf.id, entwurf);
+      meldung(neuerPunkt?neuerPunkt.name+' eingefügt':'Anlage gesichert');
+      return;
+    }
     if(werte.lat==null || werte.lon==null){
       const treffer=S.punkte.find(x=>x.abk===abk);
       if(treffer && !hatKoord(treffer)){
@@ -1476,11 +1585,18 @@ const TATEN = {
     const p=S.teamProfile.find(x=>x.id===e.dataset.id); if(!p) return;
     const zeilen=S.teamStand.filter(r=>r.benutzer_id===p.id)
       .sort((a,b)=>(a.art+(a.ablauf||'9999')).localeCompare(b.art+(b.ablauf||'9999')));
-    blattOeffnen(p.name||'Konto',()=>zeilen.length?`<div class="liste">${zeilen.map(r=>`
+    blattOeffnen(p.name||'Konto',()=>`
+      <button class="btn haupt voll" data-tat="person-karte" data-id="${p.id}" style="margin-bottom:12px">Auf der Karte anzeigen</button>`
+      + (zeilen.length?`<div class="liste">${zeilen.map(r=>`
       <div class="punkt"><span class="lampe ${r.zustand}"></span>
       <span class="txt"><span class="n">${esc(r.objekt)}</span>
       <span class="m">${r.art==='strecke'?'Strecke':'Anlage'} · ${ZTEXT[r.zustand]||r.zustand}${r.ablauf?' · bis '+datum(r.ablauf):''}</span></span></div>`).join('')}</div>`
-      :`<div class="leer">Für dieses Konto ist noch keine Kenntnis erfasst.</div>`);
+      :`<div class="leer">Für dieses Konto ist noch keine Kenntnis erfasst.</div>`));
+  },
+  'person-karte': e=>{
+    KARTENPERSON=e.dataset.id; KARTENMODUS='ansehen'; VERLAUF=[];
+    blattZu(); ANSICHT='karte'; SUCHE=''; FILTER='alle';
+    zeichnen(); window.scrollTo(0,0);
   },
   'team-objekt': e=>{
     const art=e.dataset.wert;
@@ -1625,6 +1741,13 @@ document.addEventListener('click',ev=>{
   const tat=TATEN[ziel.dataset.tat];
   if(tat){ ev.preventDefault(); tat(ziel); }
 });
+document.addEventListener('change',ev=>{
+  if(ev.target.id==='k-person'){
+    KARTENPERSON=ev.target.value;
+    KARTENMODUS='ansehen'; VERLAUF=[];
+    zeichnen();
+  }
+});
 document.addEventListener('input',ev=>{
   if(ev.target.id==='p-suche'){
     clearTimeout(SUCHLAUF);
@@ -1636,6 +1759,12 @@ document.addEventListener('change',async ev=>{
   if(ev.target.id!=='f-bpwahl' || !ev.target.value || !ENTWURF) return;
   let wert=ev.target.value;
   ev.target.value='';
+  if(wert==='suchen'){
+    const merker={...ENTWURF, punkte:[...ENTWURF.punkte]};
+    formularPunkt(null);
+    STRECKE_ZURUECK=merker;   // nach formularPunkt setzen, blattZu räumt sonst auf
+    return;
+  }
   if(wert.startsWith('neu:')){
     const abk=wert.slice(4);
     const eintrag=STAMM_BP.find(x=>x[0]===abk);
