@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Swiss Rail Connections — Kenntnisregister</title>
 <link rel="icon" type="image/png" href="logo-marke.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
@@ -134,10 +135,10 @@ textarea{resize:vertical;min-height:64px;font-size:15px}
 nav{position:fixed;bottom:0;left:0;right:0;z-index:40;display:flex;background:var(--panel);
   border-top:1px solid var(--linie);padding-bottom:env(safe-area-inset-bottom)}
 nav[hidden]{display:none}
-nav button{flex:1;padding:9px 2px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--stahl);
+nav button{flex:1;padding:9px 1px 10px;font-size:9px;text-transform:uppercase;letter-spacing:.02em;color:var(--stahl);
   display:flex;flex-direction:column;align-items:center;gap:5px;font-weight:600;border-top:2px solid transparent;margin-top:-1px}
 nav button.an{color:var(--kreide);border-top-color:var(--kreide)}
-nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+nav svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 
 .tor{max-width:420px;margin:0 auto;padding:56px 20px 40px}
 .tor .logo{font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--stahl);margin-bottom:8px}
@@ -153,6 +154,22 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.6;st
 .rollenschild{font-family:var(--mono);font-size:10px;letter-spacing:.12em;border:1px solid var(--linie);
   border-radius:2px;padding:3px 6px;color:var(--stahl)}
 .rollenschild.admin{color:var(--warnung);border-color:#4d411a}
+.kartenbox{height:64vh;min-height:340px;border:1px solid var(--linie);border-radius:3px;overflow:hidden;background:#0f1214}
+.leaflet-container{background:#0f1214;font-family:var(--ui)}
+.leaflet-control-attribution{background:rgba(20,24,27,.82)!important;color:#7d8b93!important;font-size:9px}
+.leaflet-control-attribution a{color:#9fb0b8!important}
+.leaflet-bar a,.leaflet-control-layers{background:var(--panel)!important;color:var(--kreide)!important;border-color:var(--linie)!important}
+.leaflet-bar a{border-bottom-color:var(--linie)!important}
+.leaflet-control-layers-expanded{color:var(--kreide);padding:8px 10px}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel);color:var(--kreide);border-radius:3px;box-shadow:0 4px 18px rgba(0,0,0,.5)}
+.leaflet-popup-content{margin:11px 13px;font-size:15px;line-height:1.35}
+.leaflet-popup-content b{display:block;font-size:17px;margin-bottom:2px}
+.leaflet-popup-content .pm{font-family:var(--mono);font-size:11px;color:var(--stahl);letter-spacing:.06em}
+.leaflet-container a.leaflet-popup-close-button{color:var(--stahl)}
+.legende{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:12px;color:var(--stahl)}
+.legende span{display:flex;align-items:center;gap:5px}
+.hinweisbalken{background:var(--panel2);border:1px solid var(--linie);border-left:2px solid var(--lernen);
+  border-radius:2px;padding:10px 12px;font-size:14px;margin-bottom:9px}
 .fussnote{font-size:12px;color:var(--stahl);line-height:1.5}
 .mono{font-family:var(--mono)}
 :focus-visible{outline:2px solid var(--lernen);outline-offset:2px}
@@ -175,6 +192,7 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.6;st
 
 <div class="hintergrund" id="hintergrund" hidden><div class="blatt" id="blatt"></div></div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
 <script>
 /* ============================================================
@@ -211,6 +229,8 @@ let S = {
 };
 let ANSICHT='uebersicht', SUCHE='', FILTER='alle', JOURNAL='fahrten',
     TEAMMODUS='mitarbeiter', ENTWURF=null, TORMODUS='anmelden';
+let KARTE=null, KARTENSICHT={center:[46.82,8.23], zoom:8},
+    KARTENMODUS='ansehen', KARTENZIEL='', VERLAUF=[];
 
 /* ---------- Werkzeuge ---------- */
 const $ = id => document.getElementById(id);
@@ -266,6 +286,7 @@ const zustandA = pid => zustandVon(kenntnisA(pid), ablaufA(pid));
 
 const ZTEXT={gueltig:'Kenntnis gültig',warnung:'Läuft bald ab',abgelaufen:'Abgelaufen',ausbildung:'In Ausbildung',keine:'Keine Kenntnis'};
 const ZFARBE={gueltig:'var(--fahrt)',warnung:'var(--warnung)',abgelaufen:'var(--halt)',ausbildung:'var(--lernen)',keine:'#39454b'};
+const ZHEX={gueltig:'#2fbf71',warnung:'#f2b705',abgelaufen:'#e23d28',ausbildung:'#4da3ff',keine:'#6b7a82'};
 
 function punkt(id){ return S.punkte.find(p=>p.id===id); }
 function code(id){ const p=punkt(id); return p?p.abk:'??'; }
@@ -529,6 +550,144 @@ function ansichtTeam(){
   </div>`;
 }
 
+/* ============================================================
+   Karte
+   ============================================================ */
+function hatKoord(p){ return p && p.lat!=null && p.lon!=null; }
+function darfStamm(o){ return istAdmin() || (o && o.erstellt_von===S.user.id); }
+
+function streckenGeometrie(st){
+  if(Array.isArray(st.verlauf) && st.verlauf.length>1) return st.verlauf.map(k=>[k[0],k[1]]);
+  return (st.punkte||[]).map(punkt).filter(hatKoord).map(p=>[p.lat,p.lon]);
+}
+
+function ansichtKarte(){
+  const ohne = S.punkte.filter(p=>!hatKoord(p)).length;
+  const wahl = KARTENMODUS==='punkt'
+    ? `<label style="margin-bottom:9px"><span>Betriebspunkt wählen, dann auf die Karte tippen</span>
+        <select id="kz-punkt">${S.punkte.slice().sort((a,b)=>(hatKoord(a)?1:0)-(hatKoord(b)?1:0)||a.name.localeCompare(b.name,'de'))
+          .map(p=>`<option value="${p.id}"${KARTENZIEL===p.id?' selected':''}>${hatKoord(p)?'●':'○'} ${esc(p.abk)} — ${esc(p.name)}</option>`).join('')}</select></label>`
+    : KARTENMODUS==='verlauf'
+    ? `<label style="margin-bottom:9px"><span>Strecke wählen, dann Stützpunkte antippen</span>
+        <select id="kz-strecke">${S.strecken.slice().sort((a,b)=>a.name.localeCompare(b.name,'de'))
+          .map(st=>`<option value="${st.id}"${KARTENZIEL===st.id?' selected':''}>${esc(st.name)}</option>`).join('')}</select></label>
+       <div class="aktionen" style="margin:0 0 9px">
+         <button class="btn haupt" data-tat="verlauf-sichern">Verlauf sichern (${VERLAUF.length})</button>
+         <button class="btn" data-tat="verlauf-zurueck">Letzter Punkt weg</button>
+         <button class="btn gefahr" data-tat="verlauf-leeren">Alles löschen</button>
+       </div>`
+    : '';
+
+  const hinweis = KARTENMODUS==='punkt'
+    ? '<div class="hinweisbalken">Tippe an die Stelle, an der der gewählte Betriebspunkt liegt. Die Koordinate wird sofort gespeichert. Bereits gesetzte Punkte lassen sich mit dem Finger verschieben.</div>'
+    : KARTENMODUS==='verlauf'
+    ? '<div class="hinweisbalken">Tippe den Streckenverlauf entlang der Gleise nach. Ohne eigenen Verlauf wird die Strecke gerade zwischen ihren Betriebspunkten gezogen.</div>'
+    : '';
+
+  return `
+  <div class="chips">
+    <button class="chip ${KARTENMODUS==='ansehen'?'an':''}" data-tat="kartenmodus" data-wert="ansehen">Ansehen</button>
+    <button class="chip ${KARTENMODUS==='punkt'?'an':''}" data-tat="kartenmodus" data-wert="punkt">Punkt setzen</button>
+    <button class="chip ${KARTENMODUS==='verlauf'?'an':''}" data-tat="kartenmodus" data-wert="verlauf">Verlauf zeichnen</button>
+  </div>
+  ${hinweis}${wahl}
+  <div id="karte-box" class="kartenbox"></div>
+  <div class="legende">
+    <span><span class="lampe gueltig klein"></span>Kenntnis gültig</span>
+    <span><span class="lampe warnung klein"></span>Läuft ab</span>
+    <span><span class="lampe abgelaufen klein"></span>Abgelaufen</span>
+    <span><span class="lampe ausbildung klein"></span>In Ausbildung</span>
+    <span><span class="lampe keine klein"></span>Keine Kenntnis</span>
+  </div>
+  ${ohne?`<div class="fussnote" style="margin-top:10px">${ohne} von ${S.punkte.length} Betriebspunkten haben noch keine Koordinate und erscheinen nicht auf der Karte.</div>`:''}`;
+}
+
+function karteAufbauen(){
+  const box=document.getElementById('karte-box');
+  if(!box || typeof L==='undefined') return;
+  if(KARTE){ KARTE.remove(); KARTE=null; }
+
+  KARTE = L.map(box,{ center:KARTENSICHT.center, zoom:KARTENSICHT.zoom, zoomControl:true, attributionControl:true });
+  KARTE.on('moveend zoomend', ()=>{ const c=KARTE.getCenter(); KARTENSICHT={center:[c.lat,c.lng], zoom:KARTE.getZoom()}; });
+
+  const swissGrau = L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg',
+    { maxZoom:19, attribution:'© swisstopo' });
+  const swissFarbe = L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-farbe/default/current/3857/{z}/{x}/{y}.jpeg',
+    { maxZoom:19, attribution:'© swisstopo' });
+  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { maxZoom:19, attribution:'© OpenStreetMap' });
+  const bahn = L.tileLayer('https://a.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+    { maxZoom:19, opacity:.9, attribution:'© OpenRailwayMap' });
+
+  swissGrau.addTo(KARTE); bahn.addTo(KARTE);
+  L.control.layers({ 'Landeskarte grau':swissGrau, 'Landeskarte farbig':swissFarbe, 'OpenStreetMap':osm },
+                   { 'Bahnnetz':bahn }, { collapsed:true }).addTo(KARTE);
+
+  /* Strecken als Linien, eingefärbt nach eigenem Kenntnisstand */
+  S.strecken.forEach(st=>{
+    const pfad=streckenGeometrie(st);
+    if(pfad.length<2) return;
+    const z=zustandS(st.id), a=ablaufS(st.id);
+    L.polyline(pfad,{ color:ZHEX[z], weight:z==='keine'?3:5, opacity:z==='keine'?.55:.9,
+      dashArray: st.verlauf&&st.verlauf.length>1 ? null : '9 7' })
+     .addTo(KARTE)
+     .bindPopup(`<b>${esc(st.name)}</b><span class="pm">${st.linie?esc(st.linie)+' · ':''}STRECKE</span>
+       ${ZTEXT[z]}${a?' · bis '+datum(a):''}<br>
+       <button class="btn klein haupt" data-tat="gefahren" data-id="${st.id}" style="margin-top:8px">Heute gefahren</button>
+       <button class="btn klein" data-tat="kenntnis-s" data-id="${st.id}" style="margin-top:8px">Kenntnis</button>`);
+  });
+
+  /* Betriebspunkte */
+  const beweglich = KARTENMODUS==='punkt';
+  S.punkte.filter(hatKoord).forEach(p=>{
+    const z=zustandA(p.id), a=ablaufA(p.id);
+    const m=L.circleMarker([p.lat,p.lon],{ radius:7, color:'#14181b', weight:2,
+      fillColor:ZHEX[z], fillOpacity:1 }).addTo(KARTE);
+    m.bindPopup(`<b>${esc(p.name)}</b><span class="pm">${esc(p.abk)} · ${esc(p.typ||'Bahnhof')}</span>
+      ${ZTEXT[z]}${a?' · bis '+datum(a):''}<br>
+      <button class="btn klein haupt" data-tat="gearbeitet" data-id="${p.id}" style="margin-top:8px">Heute gearbeitet</button>
+      <button class="btn klein" data-tat="kenntnis-a" data-id="${p.id}" style="margin-top:8px">Kenntnis</button>`);
+    if(beweglich && darfStamm(p)){
+      const zieh=L.marker([p.lat,p.lon],{ draggable:true, opacity:.35 }).addTo(KARTE);
+      zieh.on('dragend', async ev=>{
+        const ll=ev.target.getLatLng();
+        await koordinateSichern(p.id, ll.lat, ll.lng);
+      });
+    }
+  });
+
+  /* Entwurf des Streckenverlaufs */
+  if(KARTENMODUS==='verlauf' && VERLAUF.length){
+    L.polyline(VERLAUF,{ color:'#e8edef', weight:3, dashArray:'4 6' }).addTo(KARTE);
+    VERLAUF.forEach(k=>L.circleMarker(k,{ radius:4, color:'#e8edef', weight:1, fillColor:'#14181b', fillOpacity:1 }).addTo(KARTE));
+  }
+
+  KARTE.on('click', async ev=>{
+    if(KARTENMODUS==='punkt'){
+      const sel=document.getElementById('kz-punkt');
+      if(!sel||!sel.value){ meldung('Zuerst einen Betriebspunkt wählen', true); return; }
+      const p=punkt(sel.value);
+      if(!darfStamm(p)){ meldung('Nur die erfassende Person oder ein Administrator darf diesen Punkt verschieben', true); return; }
+      KARTENZIEL=sel.value;
+      await koordinateSichern(sel.value, ev.latlng.lat, ev.latlng.lng);
+    } else if(KARTENMODUS==='verlauf'){
+      const sel=document.getElementById('kz-strecke');
+      if(sel) KARTENZIEL=sel.value;
+      VERLAUF.push([+ev.latlng.lat.toFixed(5), +ev.latlng.lng.toFixed(5)]);
+      zeichnen();
+    }
+  });
+
+  setTimeout(()=>{ if(KARTE) KARTE.invalidateSize(); }, 120);
+}
+
+async function koordinateSichern(id, lat, lon){
+  const {error}=await db.from('betriebspunkt')
+    .update({ lat:+lat.toFixed(6), lon:+lon.toFixed(6) }).eq('id',id);
+  if(error) return fehler(error);
+  await alleLaden(); zeichnen(); meldung('Koordinate gesetzt');
+}
+
 function ansichtKonto(){
   const p=S.profil;
   return `
@@ -679,6 +838,11 @@ function formularPunkt(id){
     </div>
     <label><span>Name</span><input id="p-name" value="${esc(ENTWURF.name)}" placeholder="Olten"></label>
     <label><span>Infrastrukturbetreiberin</span><input id="p-bahn" value="${esc(ENTWURF.bahn)}" placeholder="SBB, BLS, SOB, RhB …"></label>
+    <div class="zweispaltig">
+      <label><span>Breitengrad</span><input id="p-lat" inputmode="decimal" value="${ENTWURF.lat!=null?ENTWURF.lat:''}" placeholder="47.351900"></label>
+      <label><span>Längengrad</span><input id="p-lon" inputmode="decimal" value="${ENTWURF.lon!=null?ENTWURF.lon:''}" placeholder="7.907700"></label>
+    </div>
+    <div class="hinweis">Lässt sich auch bequem über die Karte setzen: Reiter Karte, Modus «Punkt setzen».</div>
     <label><span>Notizen</span><textarea id="p-notiz" placeholder="Gleisanlage, Bedienvorschriften">${esc(ENTWURF.notiz)}</textarea></label>
     <button class="btn haupt voll" data-tat="punkt-sichern" style="margin-bottom:8px">Anlage sichern</button>
     ${p?`<button class="btn voll gefahr" data-tat="punkt-loeschen" data-id="${p.id}">Anlage löschen</button>`:''}
@@ -747,6 +911,21 @@ const TATEN = {
   'abmelden': async ()=>{ await db.auth.signOut(); },
 
   'nav': e=>{ ANSICHT=e.dataset.wert; SUCHE=''; FILTER='alle'; zeichnen(); window.scrollTo(0,0); },
+  'kartenmodus': e=>{ KARTENMODUS=e.dataset.wert; VERLAUF=[]; zeichnen(); },
+  'verlauf-zurueck': ()=>{ VERLAUF.pop(); zeichnen(); },
+  'verlauf-leeren': ()=>{ VERLAUF=[]; zeichnen(); },
+  'verlauf-sichern': async ()=>{
+    const sel=document.getElementById('kz-strecke');
+    const sid=sel?sel.value:KARTENZIEL;
+    const st=S.strecken.find(x=>x.id===sid);
+    if(!st){ meldung('Keine Strecke gewählt', true); return; }
+    if(!darfStamm(st)){ meldung('Nur die erfassende Person oder ein Administrator darf den Verlauf ändern', true); return; }
+    if(VERLAUF.length===1){ meldung('Mindestens zwei Stützpunkte nötig', true); return; }
+    const {error}=await db.from('strecke').update({verlauf:VERLAUF}).eq('id',sid);
+    if(error) return fehler(error);
+    VERLAUF=[]; await alleLaden(); zeichnen();
+    meldung('Streckenverlauf gesichert');
+  },
   'filter': e=>{ FILTER=e.dataset.wert; zeichnen(); },
   'journal': e=>{ JOURNAL=e.dataset.wert; zeichnen(); },
   'teammodus': e=>{ TEAMMODUS=e.dataset.wert; SUCHE=''; zeichnen(); },
@@ -816,7 +995,9 @@ const TATEN = {
   'punkt-sichern': async ()=>{
     const abk=$('p-abk').value.trim().toUpperCase(), name=$('p-name').value.trim();
     if(!abk||!name){ meldung('Abkürzung und Name werden benötigt', true); return; }
-    const werte={ abk, name, typ:$('p-typ').value, bahn:$('p-bahn').value.trim(), notiz:$('p-notiz').value.trim() };
+    const zahl=v=>{ const n=parseFloat(String(v).replace(',','.')); return isFinite(n)?n:null; };
+    const werte={ abk, name, typ:$('p-typ').value, bahn:$('p-bahn').value.trim(), notiz:$('p-notiz').value.trim(),
+      lat:zahl($('p-lat').value), lon:zahl($('p-lon').value) };
     const {error}=ENTWURF.id
       ? await db.from('betriebspunkt').update(werte).eq('id',ENTWURF.id)
       : await db.from('betriebspunkt').insert(werte);
@@ -920,14 +1101,20 @@ const TATEN = {
 
 /* ---------- Beispieldaten ---------- */
 async function beispieldaten(){
-  const bp=[['BS','Basel SBB'],['OL','Olten'],['AA','Aarau'],['BG','Brugg AG'],['BAD','Baden'],
-    ['ZUE','Zürich HB'],['W','Winterthur'],['SH','Schaffhausen'],['SG','St. Gallen'],['RH','Romanshorn'],
-    ['ZG','Zug'],['LZ','Luzern'],['AG','Arth-Goldau'],['BEL','Bellinzona'],['LUG','Lugano'],
-    ['CH','Chur'],['SAR','Sargans'],['ZB','Ziegelbrücke'],['BN','Bern'],['TH','Thun'],
-    ['SP','Spiez'],['IO','Interlaken Ost'],['BR','Brig'],['VS','Visp'],['FR','Fribourg'],
-    ['LS','Lausanne'],['GE','Genève'],['MG','Martigny'],['SIO','Sion'],['BI','Biel/Bienne'],
-    ['NE','Neuchâtel'],['SO','Solothurn'],['BD','Burgdorf'],['LT','Langenthal'],['DE','Delémont'],['YV','Yverdon-les-Bains']];
-  const neu=bp.filter(([abk])=>!S.punkte.some(p=>p.abk===abk)).map(([abk,name])=>({abk,name,typ:'Bahnhof',bahn:'SBB'}));
+  const bp=[['BS','Basel SBB',47.5474,7.5896],['OL','Olten',47.3519,7.9077],['AA','Aarau',47.3914,8.0512],
+    ['BG','Brugg AG',47.4808,8.2081],['BAD','Baden',47.4763,8.3084],['ZUE','Zürich HB',47.3779,8.5403],
+    ['W','Winterthur',47.5003,8.7238],['SH','Schaffhausen',47.6987,8.6329],['SG','St. Gallen',47.4231,9.3696],
+    ['RH','Romanshorn',47.5657,9.3789],['ZG','Zug',47.1739,8.5153],['LZ','Luzern',47.0502,8.3103],
+    ['AG','Arth-Goldau',47.0501,8.5464],['BEL','Bellinzona',46.1954,9.0296],['LUG','Lugano',46.0053,8.9470],
+    ['CH','Chur',46.8531,9.5289],['SAR','Sargans',47.0459,9.4453],['ZB','Ziegelbrücke',47.1359,9.0637],
+    ['BN','Bern',46.9490,7.4396],['TH','Thun',46.7549,7.6294],['SP','Spiez',46.6862,7.6800],
+    ['IO','Interlaken Ost',46.6906,7.8690],['BR','Brig',46.3195,7.9880],['VS','Visp',46.2938,7.8817],
+    ['FR','Fribourg',46.8032,7.1512],['LS','Lausanne',46.5169,6.6291],['GE','Genève',46.2102,6.1424],
+    ['MG','Martigny',46.1010,7.0722],['SIO','Sion',46.2273,7.3272],['BI','Biel/Bienne',47.1327,7.2436],
+    ['NE','Neuchâtel',46.9968,6.9364],['SO','Solothurn',47.2019,7.5348],['BD','Burgdorf',47.0570,7.6203],
+    ['LT','Langenthal',47.2148,7.7897],['DE','Delémont',47.3648,7.3494],['YV','Yverdon-les-Bains',46.7645,6.6425]];
+  const neu=bp.filter(([abk])=>!S.punkte.some(p=>p.abk===abk))
+    .map(([abk,name,lat,lon])=>({abk,name,typ:'Bahnhof',bahn:'SBB',lat,lon}));
   if(neu.length){ const {error}=await db.from('betriebspunkt').insert(neu); if(error) return fehler(error); }
   const {data:alle}=await db.from('betriebspunkt').select('id,abk');
   const karte={}; (alle||[]).forEach(p=>karte[p.abk]=p.id);
@@ -945,7 +1132,7 @@ async function beispieldaten(){
     if(error){ fehler(error); continue; }
     await db.from('strecke_punkt').insert(codes.map((c,i)=>({strecke_id:data.id,punkt_id:karte[c],reihenfolge:i})));
   }
-  meldung('Beispieldaten geladen — Abkürzungen prüfen');
+  meldung('Beispieldaten geladen — Abkürzungen und Koordinaten prüfen');
 }
 
 /* ============================================================
@@ -955,6 +1142,7 @@ const TABS=[
   ['uebersicht','Übersicht','<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>'],
   ['strecken','Strecken','<path d="M4 18h16"/><path d="M4 6h16"/><path d="M9 6v12"/><path d="M15 6v12"/>'],
   ['anlagen','Anlagen','<path d="M3 8h18"/><path d="M3 12h18"/><path d="M3 16h18"/><path d="M8 5v14"/>'],
+  ['karte','Karte','<path d="M9 4 3 6.5v13L9 17l6 3 6-2.5v-13L15 7z"/><path d="M9 4v13M15 7v13"/>'],
   ['journal','Journal','<rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h3"/>'],
   ['team','Team','<circle cx="9" cy="8" r="3"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><circle cx="17" cy="9" r="2.2"/><path d="M15 14.5c2.6-.6 5 1 5 4.5"/>'],
   ['konto','Konto','<circle cx="12" cy="8.5" r="3.2"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/>']
@@ -970,8 +1158,10 @@ function zeichnen(){
   $('kennung').innerHTML = `${esc(S.profil.name||S.user.email)} <span class="rollenschild ${istAdmin()?'admin':''}">${istAdmin()?'ADMIN':FKURZ[fkt(S.profil)]}</span>`;
 
   const seiten={uebersicht:ansichtUebersicht,strecken:ansichtStrecken,anlagen:ansichtAnlagen,
-    journal:ansichtJournal,team:ansichtTeam,konto:ansichtKonto};
+    karte:ansichtKarte,journal:ansichtJournal,team:ansichtTeam,konto:ansichtKonto};
+  if(ANSICHT!=='karte' && KARTE){ KARTE.remove(); KARTE=null; }
   $('ansicht').innerHTML=seiten[ANSICHT]();
+  if(ANSICHT==='karte') karteAufbauen();
 
   $('navigation').innerHTML=TABS.filter(([k])=>k!=='team'||istAdmin())
     .map(([k,t,ik])=>`<button class="${ANSICHT===k?'an':''}" data-tat="nav" data-wert="${k}"><svg viewBox="0 0 24 24">${ik}</svg>${t}</button>`).join('');
