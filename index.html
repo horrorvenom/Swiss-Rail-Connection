@@ -599,7 +599,10 @@ function ansichtKarte(){
     <span><span class="lampe ausbildung klein"></span>In Ausbildung</span>
     <span><span class="lampe keine klein"></span>Keine Kenntnis</span>
   </div>
-  ${ohne?`<div class="fussnote" style="margin-top:10px">${ohne} von ${S.punkte.length} Betriebspunkten haben noch keine Koordinate und erscheinen nicht auf der Karte.</div>`:''}`;
+  ${ohne?`<div class="aktionen" style="margin-top:12px">
+      <button class="btn haupt voll" data-tat="koordinaten-suchen">${ohne} fehlende Koordinaten automatisch suchen</button>
+    </div>
+    <div class="fussnote" style="margin-top:8px">Gesucht wird bei den öV-Haltestellen und der Landestopografie, sonst bei OpenStreetMap. Was dort nicht zu finden ist — Anschlussgleise, Abstellanlagen —, setzt du im Modus «Punkt setzen» von Hand.</div>`:''}`;
 }
 
 function karteAufbauen(){
@@ -686,6 +689,66 @@ async function koordinateSichern(id, lat, lon){
     .update({ lat:+lat.toFixed(6), lon:+lon.toFixed(6) }).eq('id',id);
   if(error) return fehler(error);
   await alleLaden(); zeichnen(); meldung('Koordinate gesetzt');
+}
+
+/* ============================================================
+   Koordinatensuche — swisstopo, sonst OpenStreetMap
+   ============================================================ */
+const IN_CH = (la,lo) => la>45.7 && la<47.9 && lo>5.8 && lo<10.6;
+
+function ausAttrs(a){
+  if(!a) return null;
+  const la = a.lat!=null ? +a.lat : (a.y!=null ? +a.y : null);
+  const lo = a.lon!=null ? +a.lon : (a.x!=null ? +a.x : null);
+  return (la!=null && lo!=null && IN_CH(la,lo)) ? {lat:la, lon:lo} : null;
+}
+
+async function geokodieren(p){
+  const text = encodeURIComponent(p.name||'');
+  if(!text) return null;
+
+  /* 1) Haltestellen des öffentlichen Verkehrs (BAV) */
+  try{
+    const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=featuresearch&features=ch.bav.haltestellen-oev&sr=4326&limit=1&searchText=${text}`);
+    const j=await r.json();
+    const k=ausAttrs(j.results && j.results[0] && j.results[0].attrs);
+    if(k) return {...k, quelle:'öV-Haltestellen'};
+  }catch(e){}
+
+  /* 2) Ortsnamen der Landestopografie */
+  try{
+    const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=locations&sr=4326&limit=1&searchText=${text}`);
+    const j=await r.json();
+    const k=ausAttrs(j.results && j.results[0] && j.results[0].attrs);
+    if(k) return {...k, quelle:'swisstopo'};
+  }catch(e){}
+
+  /* 3) OpenStreetMap als Rückfallebene */
+  try{
+    const r=await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ch&q=${encodeURIComponent('Bahnhof '+(p.name||''))}`);
+    const j=await r.json();
+    if(j[0] && IN_CH(+j[0].lat,+j[0].lon)) return {lat:+j[0].lat, lon:+j[0].lon, quelle:'OpenStreetMap'};
+  }catch(e){}
+
+  return null;
+}
+
+/* Setzt fehlende Koordinaten still im Hintergrund — ohne Fehlermeldung,
+   falls die Person die Stammdaten nicht ändern darf. */
+async function koordinatenNachziehen(punktIds){
+  const offen=[...new Set(punktIds)].map(punkt)
+    .filter(p=>p && !hatKoord(p) && darfStamm(p));
+  if(!offen.length) return false;
+  let gesetzt=0;
+  for(const p of offen){
+    const k=await geokodieren(p);
+    if(k){
+      const {error}=await db.from('betriebspunkt').update({lat:k.lat, lon:k.lon}).eq('id',p.id);
+      if(!error) gesetzt++;
+    }
+    await new Promise(r=>setTimeout(r,350));
+  }
+  return gesetzt>0;
 }
 
 function ansichtKonto(){
@@ -912,6 +975,22 @@ const TATEN = {
 
   'nav': e=>{ ANSICHT=e.dataset.wert; SUCHE=''; FILTER='alle'; zeichnen(); window.scrollTo(0,0); },
   'kartenmodus': e=>{ KARTENMODUS=e.dataset.wert; VERLAUF=[]; zeichnen(); },
+  'koordinaten-suchen': async ()=>{
+    const offen=S.punkte.filter(p=>!hatKoord(p) && darfStamm(p));
+    if(!offen.length){ meldung('Alle Betriebspunkte haben bereits eine Koordinate'); return; }
+    let ok=0, fehl=0, i=0;
+    for(const p of offen){
+      i++; meldung(`Suche ${i} von ${offen.length}: ${p.name} …`);
+      const k=await geokodieren(p);
+      if(k){
+        const {error}=await db.from('betriebspunkt').update({lat:k.lat, lon:k.lon}).eq('id',p.id);
+        error ? fehl++ : ok++;
+      } else fehl++;
+      await new Promise(r=>setTimeout(r,350));
+    }
+    await alleLaden(); zeichnen();
+    meldung(`${ok} Koordinaten gesetzt${fehl?', '+fehl+' nicht gefunden':''}`, fehl>0);
+  },
   'verlauf-zurueck': ()=>{ VERLAUF.pop(); zeichnen(); },
   'verlauf-leeren': ()=>{ VERLAUF=[]; zeichnen(); },
   'verlauf-sichern': async ()=>{
@@ -944,6 +1023,13 @@ const TATEN = {
       .upsert(werte,{onConflict:istS?'benutzer_id,strecke_id':'benutzer_id,punkt_id'});
     if(error) return fehler(error);
     blattZu(); await alleLaden(); zeichnen(); meldung('Kenntnis gesichert');
+    const ziele = istS
+      ? ((S.strecken.find(x=>x.id===e.dataset.id)||{}).punkte||[])
+      : [e.dataset.id];
+    if(ziele.some(id=>{const q=punkt(id); return q && !hatKoord(q);})){
+      meldung('Kenntnis gesichert — Koordinaten werden gesucht …');
+      if(await koordinatenNachziehen(ziele)){ await alleLaden(); zeichnen(); meldung('Karte ergänzt'); }
+    }
   },
   'gefahren': async e=>{
     const sid=e.dataset.id;
@@ -954,6 +1040,10 @@ const TATEN = {
       await db.from('kenntnis').upsert({ benutzer_id:S.user.id, strecke_id:sid, status:'vorhanden',
         aktualisiert:new Date().toISOString() },{onConflict:'benutzer_id,strecke_id'});
     await alleLaden(); zeichnen(); meldung('Fahrt eingetragen — Frist läuft neu');
+    const st=S.strecken.find(x=>x.id===sid);
+    if(st && (st.punkte||[]).some(id=>{const q=punkt(id); return q && !hatKoord(q);})){
+      if(await koordinatenNachziehen(st.punkte)){ await alleLaden(); zeichnen(); meldung('Karte ergänzt'); }
+    }
   },
   'gearbeitet': async e=>{
     const pid=e.dataset.id;
@@ -964,6 +1054,9 @@ const TATEN = {
       await db.from('anlagenkenntnis').upsert({ benutzer_id:S.user.id, punkt_id:pid, status:'vorhanden',
         aktualisiert:new Date().toISOString() },{onConflict:'benutzer_id,punkt_id'});
     await alleLaden(); zeichnen(); meldung('Einsatz eingetragen — Frist läuft neu');
+    if(!hatKoord(punkt(pid)) && await koordinatenNachziehen([pid])){
+      await alleLaden(); zeichnen(); meldung('Karte ergänzt');
+    }
   },
 
   'strecke-neu': ()=>formularStrecke(null),
@@ -1003,6 +1096,14 @@ const TATEN = {
       : await db.from('betriebspunkt').insert(werte);
     if(error) return fehler(error);
     blattZu(); await alleLaden(); zeichnen(); meldung('Anlage gesichert');
+    if(werte.lat==null || werte.lon==null){
+      const treffer=S.punkte.find(x=>x.abk===abk);
+      if(treffer && !hatKoord(treffer)){
+        meldung('Anlage gesichert — Koordinate wird gesucht …');
+        if(await koordinatenNachziehen([treffer.id])){ await alleLaden(); zeichnen(); meldung('Koordinate gefunden'); }
+        else meldung('Keine Koordinate gefunden — auf der Karte von Hand setzen', true);
+      }
+    }
   },
   'punkt-loeschen': async e=>{
     const n=S.strecken.filter(s=>(s.punkte||[]).includes(e.dataset.id)).length;
