@@ -1200,40 +1200,69 @@ const TATEN = {
   'beispiel': async ()=>{ await beispieldaten(); await alleLaden(); zeichnen(); }
 };
 
-/* ---------- Beispieldaten ---------- */
+/* ---------- Beispieldaten ----------
+   Abkürzungen und Streckennummern nach der SBB-Übersicht
+   "R 30131 Übersicht Streckentabellen" (RADN). Wo die Nummer
+   im Plan nicht eindeutig abzulesen war, bleibt sie leer.      */
 async function beispieldaten(){
-  const bp=[['BS','Basel SBB',47.5474,7.5896],['OL','Olten',47.3519,7.9077],['AA','Aarau',47.3914,8.0512],
-    ['BG','Brugg AG',47.4808,8.2081],['BAD','Baden',47.4763,8.3084],['ZUE','Zürich HB',47.3779,8.5403],
-    ['W','Winterthur',47.5003,8.7238],['SH','Schaffhausen',47.6987,8.6329],['SG','St. Gallen',47.4231,9.3696],
-    ['RH','Romanshorn',47.5657,9.3789],['ZG','Zug',47.1739,8.5153],['LZ','Luzern',47.0502,8.3103],
-    ['AG','Arth-Goldau',47.0501,8.5464],['BEL','Bellinzona',46.1954,9.0296],['LUG','Lugano',46.0053,8.9470],
-    ['CH','Chur',46.8531,9.5289],['SAR','Sargans',47.0459,9.4453],['ZB','Ziegelbrücke',47.1359,9.0637],
-    ['BN','Bern',46.9490,7.4396],['TH','Thun',46.7549,7.6294],['SP','Spiez',46.6862,7.6800],
-    ['IO','Interlaken Ost',46.6906,7.8690],['BR','Brig',46.3195,7.9880],['VS','Visp',46.2938,7.8817],
-    ['FR','Fribourg',46.8032,7.1512],['LS','Lausanne',46.5169,6.6291],['GE','Genève',46.2102,6.1424],
-    ['MG','Martigny',46.1010,7.0722],['SIO','Sion',46.2273,7.3272],['BI','Biel/Bienne',47.1327,7.2436],
-    ['NE','Neuchâtel',46.9968,6.9364],['SO','Solothurn',47.2019,7.5348],['BD','Burgdorf',47.0570,7.6203],
-    ['LT','Langenthal',47.2148,7.7897],['DE','Delémont',47.3648,7.3494],['YV','Yverdon-les-Bains',46.7645,6.6425]];
+  const bp=[
+    ['BS','Basel SBB',47.5474,7.5896],       ['PR','Pratteln',47.5210,7.6930],
+    ['SIS','Sissach',47.4640,7.8110],        ['OL','Olten',47.3519,7.9077],
+    ['AA','Aarau',47.3914,8.0512],           ['LB','Lenzburg',47.3906,8.1735],
+    ['BRGG','Brugg AG',47.4808,8.2081],      ['BAD','Baden',47.4763,8.3084],
+    ['ZAS','Zürich Altstetten',47.3915,8.4890], ['ZUE','Zürich HB',47.3779,8.5403],
+    ['OGL','Zürich Oerlikon',47.4114,8.5442],['W','Winterthur',47.5003,8.7238],
+    ['WL','Wil SG',47.4634,9.0450],          ['GSS','Gossau SG',47.4155,9.2530],
+    ['SG','St. Gallen',47.4231,9.3696],      ['SH','Schaffhausen',47.6987,8.6329],
+    ['RH','Romanshorn',47.5657,9.3789],      ['ZG','Zug',47.1739,8.5153],
+    ['RK','Rotkreuz',47.1443,8.4330],        ['LZ','Luzern',47.0502,8.3103],
+    ['GD','Arth-Goldau',47.0501,8.5464],     ['AL','Altdorf',46.8790,8.6420],
+    ['GOE','Göschenen',46.6660,8.5860],      ['BEL','Bellinzona',46.1954,9.0296],
+    ['LUG','Lugano',46.0053,8.9470],         ['CH','Chur',46.8531,9.5289],
+    ['SA','Sargans',47.0459,9.4453],         ['ZB','Ziegelbrücke',47.1359,9.0637],
+    ['BN','Bern',46.9490,7.4396],            ['BDF','Burgdorf',47.0570,7.6203],
+    ['LGUT','Langenthal',47.2148,7.7897],    ['SO','Solothurn',47.2019,7.5348],
+    ['TH','Thun',46.7549,7.6294],            ['SP','Spiez',46.6862,7.6800],
+    ['FR','Frutigen',46.5880,7.6510],        ['IO','Interlaken Ost',46.6906,7.8690],
+    ['VI','Visp',46.2938,7.8817],            ['BR','Brig',46.3195,7.9880],
+    ['FRI','Fribourg',46.8032,7.1512],       ['LS','Lausanne',46.5169,6.6291],
+    ['GE','Genève',46.2102,6.1424],          ['MG','Martigny',46.1010,7.0722],
+    ['SIO','Sion',46.2273,7.3272],           ['BI','Biel/Bienne',47.1327,7.2436],
+    ['NE','Neuchâtel',46.9968,6.9364],       ['DMT','Delémont',47.3648,7.3494],
+    ['YV','Yverdon-les-Bains',46.7645,6.6425]
+  ];
   const neu=bp.filter(([abk])=>!S.punkte.some(p=>p.abk===abk))
     .map(([abk,name,lat,lon])=>({abk,name,typ:'Bahnhof',bahn:'SBB',lat,lon}));
   if(neu.length){ const {error}=await db.from('betriebspunkt').insert(neu); if(error) return fehler(error); }
   const {data:alle}=await db.from('betriebspunkt').select('id,abk');
   const karte={}; (alle||[]).forEach(p=>karte[p.abk]=p.id);
-  const str=[['Basel SBB – Olten (Hauenstein-Basislinie)','500','40',['BS','OL']],
-    ['Olten – Bern','450','62',['OL','LT','BD','BN']],
-    ['Olten – Zürich HB','650','65',['OL','AA','BG','BAD','ZUE']],
-    ['Bern – Brig (Lötschberg)','300','116',['BN','TH','SP','BR']],
-    ['Zürich HB – Chur','900','120',['ZUE','ZB','SAR','CH']],
-    ['Zürich HB – St. Gallen','850','86',['ZUE','W','SG']],
-    ['Luzern – Bellinzona (Gotthard-Bergstrecke)','600','160',['LZ','AG','BEL']],
-    ['Lausanne – Brig (Simplonlinie)','100','150',['LS','MG','SIO','VS','BR']]];
-  for(const [name,linie,km,codes] of str){
+
+  const str=[
+    ['111','Genève – Lausanne','60',['GE','LS']],
+    ['211','Lausanne – Sion','107',['LS','MG','SIO']],
+    ['221','Sion – Brig','48',['SIO','VI','BR']],
+    ['222','Brig – Iselle (Simplon)','23',['BR']],
+    ['322','Thun – Spiez – Frutigen','22',['TH','SP','FR']],
+    ['351','Frutigen – Brig (Lötschberg-Bergstrecke)','52',['FR','BR']],
+    ['361','Spiez – Interlaken Ost','25',['SP','IO']],
+    ['371','Bern – Thun','31',['BN','TH']],
+    ['391','Frutigen – Visp (Lötschberg-Basistunnel)','40',['FR','VI']],
+    ['411','Basel SBB – Olten (Hauenstein-Basislinie)','39',['BS','PR','SIS','OL']],
+    ['531','Luzern – Arth-Goldau – Göschenen','76',['LZ','GD','AL','GOE']],
+    ['541','Göschenen – Bellinzona','86',['GOE','BEL']],
+    ['602','Zürich HB – Winterthur','28',['ZUE','OGL','W']],
+    ['711','Winterthur – St. Gallen','58',['W','WL','GSS','SG']],
+    ['','Olten – Bern','62',['OL','LGUT','BDF','BN']],
+    ['','Olten – Zürich HB','65',['OL','AA','BRGG','BAD','ZUE']],
+    ['','Zürich HB – Chur','120',['ZUE','ZB','SA','CH']]
+  ];
+  for(const [linie,name,km,codes] of str){
     if(S.strecken.some(s=>s.name===name)) continue;
     const {data,error}=await db.from('strecke').insert({name,linie,km}).select().single();
     if(error){ fehler(error); continue; }
     await db.from('strecke_punkt').insert(codes.map((c,i)=>({strecke_id:data.id,punkt_id:karte[c],reihenfolge:i})));
   }
-  meldung('Beispieldaten geladen — Abkürzungen und Koordinaten prüfen');
+  meldung('Beispieldaten geladen — drei Strecken ohne Nummer nachtragen');
 }
 
 /* ============================================================
