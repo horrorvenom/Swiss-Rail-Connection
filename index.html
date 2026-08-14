@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Streckenkenntnis — Register</title>
+<title>Swiss Rail Connections — Kenntnisregister</title>
+<link rel="icon" type="image/png" href="logo-marke.png">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
@@ -26,9 +27,11 @@ header{position:sticky;top:0;z-index:30;background:var(--graphit);border-bottom:
   padding:14px 16px 10px;padding-top:calc(14px + env(safe-area-inset-top))}
 header[hidden]{display:none}
 .marke{display:flex;align-items:baseline;gap:10px}
-.marke h1{font-size:21px;text-transform:uppercase;letter-spacing:.06em}
-.marke .kennung{font-family:var(--mono);font-size:11px;color:var(--stahl);letter-spacing:.14em;margin-left:auto}
-.statuszeile{font-family:var(--mono);font-size:11px;color:var(--stahl);margin-top:4px;min-height:14px;letter-spacing:.06em}
+.marke h1{font-size:19px;text-transform:uppercase;letter-spacing:.04em}
+.logo-kopf{height:27px;width:auto;display:block;flex:0 0 auto}
+.tor .logo-bild{width:100%;max-width:290px;height:auto;display:block;margin:0 0 18px}
+.marke .kennung{font-family:var(--mono);font-size:11px;color:var(--stahl);letter-spacing:.1em;margin-left:auto;white-space:nowrap}
+.statuszeile{font-family:var(--mono);font-size:11px;color:var(--stahl);margin-top:4px;min-height:14px;letter-spacing:.05em}
 .statuszeile.fehler{color:var(--halt)}
 
 main{padding:16px 16px 24px;max-width:820px;margin:0 auto}
@@ -59,6 +62,7 @@ main{padding:16px 16px 24px;max-width:820px;margin:0 auto}
 .frist{font-family:var(--mono);font-size:12px;color:var(--stahl);margin-top:6px}
 .frist b{font-weight:600;color:var(--kreide)}
 .frist.rot b{color:var(--halt)} .frist.gelb b{color:var(--warnung)}
+.meta{font-size:13px;color:var(--stahl);margin-top:8px}
 
 .band{display:flex;align-items:center;margin:11px 0 3px;overflow:hidden}
 .band .bp{display:flex;align-items:center;flex:0 0 auto}
@@ -68,6 +72,9 @@ main{padding:16px 16px 24px;max-width:820px;margin:0 auto}
 .band .code{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.08em;color:var(--stahl);padding:0 5px;white-space:nowrap}
 .band .code.rand{color:var(--kreide);font-weight:600}
 .band .rest{font-family:var(--mono);font-size:11px;color:#5f6d75;padding:0 5px}
+
+.gleisfeld{display:flex;flex-direction:column;gap:3px;margin:11px 0 3px}
+.gleisfeld i{display:block;height:2px;background:var(--linie);border-radius:1px}
 
 .balken{height:3px;background:#2a3238;border-radius:2px;overflow:hidden;margin-top:9px}
 .balken i{display:block;height:100%}
@@ -80,7 +87,6 @@ main{padding:16px 16px 24px;max-width:820px;margin:0 auto}
 .btn.gefahr{color:var(--halt);border-color:#4a2b26}
 .btn.voll{width:100%;text-align:center}
 .btn.klein{padding:5px 9px;font-size:13px}
-.btn[disabled]{opacity:.5}
 
 .suche{width:100%;background:var(--panel);border:1px solid var(--linie);border-radius:2px;padding:11px 12px;margin-bottom:9px;outline:none}
 .suche:focus{border-color:#4a5960}
@@ -98,7 +104,7 @@ main{padding:16px 16px 24px;max-width:820px;margin:0 auto}
 .punkt .txt{flex:1;min-width:0}
 .punkt .txt .n{display:block;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .punkt .txt .m{display:block;font-size:12px;color:var(--stahl)}
-.ampel{display:flex;gap:4px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--stahl)}
+.ampel{display:flex;gap:5px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--stahl)}
 .ampel span{display:flex;align-items:center;gap:3px}
 
 .leer{border:1px dashed var(--linie);border-radius:3px;padding:22px 16px;text-align:center;color:var(--stahl);font-size:15px}
@@ -116,8 +122,8 @@ textarea{resize:vertical;min-height:64px;font-size:15px}
 .hintergrund[hidden]{display:none}
 .blatt{background:var(--panel);border:1px solid var(--linie);border-bottom:none;border-radius:6px 6px 0 0;
   width:100%;max-width:820px;max-height:92vh;overflow-y:auto;padding:16px 16px calc(20px + env(safe-area-inset-bottom))}
-.blatt h3{font-size:19px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center}
-.blatt h3 button{font-family:var(--mono);font-size:13px;color:var(--stahl)}
+.blatt h3{font-size:19px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.blatt h3 button{font-family:var(--mono);font-size:13px;color:var(--stahl);white-space:nowrap}
 
 .bpwahl{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;min-height:34px}
 .bptag{font-family:var(--mono);font-size:12px;letter-spacing:.07em;background:var(--panel2);border:1px solid var(--linie);
@@ -128,15 +134,14 @@ textarea{resize:vertical;min-height:64px;font-size:15px}
 nav{position:fixed;bottom:0;left:0;right:0;z-index:40;display:flex;background:var(--panel);
   border-top:1px solid var(--linie);padding-bottom:env(safe-area-inset-bottom)}
 nav[hidden]{display:none}
-nav button{flex:1;padding:9px 2px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--stahl);
+nav button{flex:1;padding:9px 2px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--stahl);
   display:flex;flex-direction:column;align-items:center;gap:5px;font-weight:600;border-top:2px solid transparent;margin-top:-1px}
 nav button.an{color:var(--kreide);border-top-color:var(--kreide)}
 nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 
-/* Anmeldung */
 .tor{max-width:420px;margin:0 auto;padding:56px 20px 40px}
 .tor .logo{font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--stahl);margin-bottom:8px}
-.tor h1{font-size:30px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.tor h1{font-size:30px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
 .tor .unter{color:var(--stahl);font-size:15px;margin-bottom:26px;line-height:1.45}
 .wechsel{display:flex;border:1px solid var(--linie);border-radius:2px;margin-bottom:20px;overflow:hidden}
 .wechsel button{flex:1;padding:10px;font-size:14px;font-weight:600;color:var(--stahl);letter-spacing:.05em}
@@ -157,7 +162,9 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.6;st
 
 <header id="kopf" hidden>
   <div class="marke">
-    <h1>Streckenkenntnis</h1>
+    <img src="logo.png" alt="Swiss Rail Connections" class="logo-kopf"
+         onerror="this.remove();var t=document.getElementById('marke-text');if(t)t.hidden=false">
+    <h1 id="marke-text" hidden>Swiss Rail Connections</h1>
     <span class="kennung" id="kennung"></span>
   </div>
   <div class="statuszeile" id="statuszeile"></div>
@@ -168,30 +175,50 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.6;st
 
 <div class="hintergrund" id="hintergrund" hidden><div class="blatt" id="blatt"></div></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
 <script>
 /* ============================================================
-   ZUGANGSDATEN — im Supabase-Dashboard unter
-   Project Settings > API zu finden. Nur diese zwei Zeilen anpassen.
+   ZUGANGSDATEN — Supabase Dashboard, Settings > API Keys / Data API
    ============================================================ */
 const SUPABASE_URL      = 'https://rjydrpkxzkacnbblkyzf.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_bII4ZamzpUBFq_6EKsGMZA_mxrTD9mS';
 /* ========================================================== */
 
-const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let db = null;
+function startfehler(text){
+  document.body.innerHTML = `<div class="tor"><div class="logo">START NICHT MÖGLICH</div>
+    <h1>App nicht bereit</h1><div class="unter">${text}</div></div>`;
+}
+window.addEventListener('error', ev=>{
+  const z=document.querySelector('#torstatus')||document.querySelector('#statuszeile');
+  if(z){ z.textContent=(ev.message||'Unbekannter Fehler'); z.className='statuszeile fehler'; }
+});
+try{
+  if(!window.supabase || !window.supabase.createClient)
+    throw new Error('Die Supabase-Bibliothek wurde nicht geladen. Internetverbindung prüfen; im Firmennetz ist cdn.jsdelivr.net eventuell gesperrt.');
+  if(!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/.test(SUPABASE_URL))
+    throw new Error('Die Projekt-URL ist ungültig. Sie muss so aussehen: https://projektkennung.supabase.co — ohne /rest/v1/ am Ende.');
+  db = window.supabase.createClient(SUPABASE_URL.replace(/\/+$/,''), SUPABASE_ANON_KEY);
+}catch(e){ startfehler(e.message); }
 
 let S = {
   user:null, profil:null,
   konfig:{ gueltig_monate:12, warn_tage:60 },
-  punkte:[], strecken:[], kenntnis:{}, fahrten:[],
+  punkte:[], strecken:[],
+  kS:{}, kA:{},
+  fahrten:[], einsaetze:[],
   teamProfile:[], teamStand:[]
 };
-let ANSICHT='uebersicht', SUCHE='', FILTER='alle', TEAMMODUS='mitarbeiter', ENTWURF=null, TORMODUS='anmelden';
+let ANSICHT='uebersicht', SUCHE='', FILTER='alle', JOURNAL='fahrten',
+    TEAMMODUS='mitarbeiter', ENTWURF=null, TORMODUS='anmelden';
 
 /* ---------- Werkzeuge ---------- */
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const istAdmin = () => S.profil && S.profil.rolle === 'admin';
+const FUNKTION = { lokfuehrer:'Lokführer', rangierleiter:'Rangierleiter', beides:'Lokführer und Rangierleiter' };
+const FKURZ    = { lokfuehrer:'LF', rangierleiter:'RL', beides:'LF·RL' };
+const fkt = p => (p && p.funktion) || 'lokfuehrer';
 
 function heute(){ const d=new Date(); return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10); }
 function monateDazu(iso,m){ const d=new Date(iso+'T00:00:00'); const t=d.getDate(); d.setMonth(d.getMonth()+m);
@@ -199,136 +226,179 @@ function monateDazu(iso,m){ const d=new Date(iso+'T00:00:00'); const t=d.getDate
 function tageBis(iso){ return Math.round((new Date(iso+'T00:00:00')-new Date(heute()+'T00:00:00'))/864e5); }
 function datum(iso){ if(!iso) return '—'; const [j,m,t]=String(iso).slice(0,10).split('-'); return `${t}.${m}.${j}`; }
 
-function meldung(text, fehler){
-  const z=$('statuszeile'); if(!z) return;
-  z.textContent=text; z.className='statuszeile'+(fehler?' fehler':'');
-  clearTimeout(meldung._t); meldung._t=setTimeout(()=>{ z.textContent=''; }, fehler?6000:2600);
+function meldung(text, fehlerhaft){
+  const z = document.querySelector('#torstatus') || $('statuszeile');
+  if(!z) return;
+  z.textContent=text; z.className='statuszeile'+(fehlerhaft?' fehler':'');
+  clearTimeout(meldung._t); meldung._t=setTimeout(()=>{ z.textContent=''; }, fehlerhaft?9000:2600);
 }
 function fehler(e){ meldung(e && e.message ? e.message : String(e), true); }
 
-/* ---------- Fachlogik ---------- */
-function punkt(id){ return S.punkte.find(p=>p.id===id); }
-function code(id){ const p=punkt(id); return p?p.abk:'??'; }
-function meineKenntnis(sid){ return S.kenntnis[sid] || { status:'keine', erwerb:null, letzte_befahrung:null, notiz:'' }; }
+/* ============================================================
+   Fachlogik — für Strecken und Anlagen identisch
+   ============================================================ */
+const LEER = { status:'keine', erwerb:null, letzte:null, notiz:'' };
+function kenntnisS(id){ const k=S.kS[id]; return k?{...k,letzte:k.letzte_befahrung}:LEER; }
+function kenntnisA(id){ const k=S.kA[id]; return k?{...k,letzte:k.letzte_taetigkeit}:LEER; }
 
-function letzteBefahrung(sid){
-  const k=meineKenntnis(sid); let d=k.letzte_befahrung||'';
-  S.fahrten.forEach(f=>{ if(f.strecke_id===sid && f.datum>d) d=f.datum; });
-  return d||'';
+function letztesDatum(eintraege, feld, id){
+  let d=''; eintraege.forEach(e=>{ if(e[feld]===id && e.datum>d) d=e.datum; }); return d;
 }
-function ablauf(sid){
-  const k=meineKenntnis(sid);
+function fristVon(k, journalDatum){
   if(k.status!=='vorhanden') return '';
-  const l=letzteBefahrung(sid), e=k.erwerb||'';
-  const basis=(l>e?l:e)||'';
+  const kandidaten=[k.erwerb||'', k.letzte||'', journalDatum||''].filter(Boolean).sort();
+  const basis=kandidaten[kandidaten.length-1];
   return basis ? monateDazu(basis, S.konfig.gueltig_monate) : '';
 }
-function zustand(sid){
-  const k=meineKenntnis(sid);
+function zustandVon(k, ablaufDatum){
   if(k.status==='keine') return 'keine';
   if(k.status==='ausbildung') return 'ausbildung';
-  const a=ablauf(sid); if(!a) return 'gueltig';
-  const t=tageBis(a);
+  if(!ablaufDatum) return 'gueltig';
+  const t=tageBis(ablaufDatum);
   if(t<0) return 'abgelaufen';
   if(t<=S.konfig.warn_tage) return 'warnung';
   return 'gueltig';
 }
+const ablaufS  = sid => fristVon(kenntnisS(sid), letztesDatum(S.fahrten,'strecke_id',sid));
+const zustandS = sid => zustandVon(kenntnisS(sid), ablaufS(sid));
+const ablaufA  = pid => fristVon(kenntnisA(pid), letztesDatum(S.einsaetze,'punkt_id',pid));
+const zustandA = pid => zustandVon(kenntnisA(pid), ablaufA(pid));
+
 const ZTEXT={gueltig:'Kenntnis gültig',warnung:'Läuft bald ab',abgelaufen:'Abgelaufen',ausbildung:'In Ausbildung',keine:'Keine Kenntnis'};
 const ZFARBE={gueltig:'var(--fahrt)',warnung:'var(--warnung)',abgelaufen:'var(--halt)',ausbildung:'var(--lernen)',keine:'#39454b'};
 
+function punkt(id){ return S.punkte.find(p=>p.id===id); }
+function code(id){ const p=punkt(id); return p?p.abk:'??'; }
+
 /* ---------- Daten laden ---------- */
 async function alleLaden(){
-  const [kf,bp,st,sp,ke,fa] = await Promise.all([
+  const [kf,bp,st,sp,ke,an,fa,ei] = await Promise.all([
     db.from('konfiguration').select('*').eq('id',1).maybeSingle(),
     db.from('betriebspunkt').select('*'),
     db.from('strecke').select('*'),
     db.from('strecke_punkt').select('*').order('reihenfolge'),
     db.from('kenntnis').select('*').eq('benutzer_id', S.user.id),
-    db.from('fahrt').select('*').eq('benutzer_id', S.user.id).order('datum',{ascending:false}).limit(400)
+    db.from('anlagenkenntnis').select('*').eq('benutzer_id', S.user.id),
+    db.from('fahrt').select('*').eq('benutzer_id', S.user.id).order('datum',{ascending:false}).limit(400),
+    db.from('einsatz').select('*').eq('benutzer_id', S.user.id).order('datum',{ascending:false}).limit(400)
   ]);
-  const err=[kf,bp,st,sp,ke,fa].find(r=>r.error);
+  const err=[kf,bp,st,sp,ke,an,fa,ei].find(r=>r.error);
   if(err){ fehler(err.error); return; }
 
   if(kf.data) S.konfig=kf.data;
   S.punkte=bp.data||[];
-  const zuordnung={};
-  (sp.data||[]).forEach(r=>{ (zuordnung[r.strecke_id] ||= []).push(r.punkt_id); });
-  S.strecken=(st.data||[]).map(s=>({ ...s, punkte: zuordnung[s.id]||[] }));
-  S.kenntnis={}; (ke.data||[]).forEach(k=>{ S.kenntnis[k.strecke_id]=k; });
-  S.fahrten=fa.data||[];
+  const zu={}; (sp.data||[]).forEach(r=>{ (zu[r.strecke_id] = zu[r.strecke_id] || []).push(r.punkt_id); });
+  S.strecken=(st.data||[]).map(s=>({ ...s, punkte: zu[s.id]||[] }));
+  S.kS={}; (ke.data||[]).forEach(k=>{ S.kS[k.strecke_id]=k; });
+  S.kA={}; (an.data||[]).forEach(k=>{ S.kA[k.punkt_id]=k; });
+  S.fahrten=fa.data||[]; S.einsaetze=ei.data||[];
 
   if(istAdmin()) await teamLaden();
 }
 async function teamLaden(){
-  const [pr,vw]=await Promise.all([
+  const [pr,vs,va]=await Promise.all([
     db.from('profil').select('*').order('name'),
-    db.from('v_kenntnis_stand').select('*')
+    db.from('v_kenntnis_stand').select('*'),
+    db.from('v_anlagen_stand').select('*')
   ]);
-  if(pr.error||vw.error){ fehler((pr.error||vw.error)); return; }
-  S.teamProfile=pr.data||[]; S.teamStand=vw.data||[];
+  const err=[pr,vs,va].find(r=>r.error);
+  if(err){ fehler(err.error); return; }
+  S.teamProfile=pr.data||[];
+  S.teamStand=[
+    ...(vs.data||[]).map(r=>({...r, art:'strecke', objekt_id:r.strecke_id, objekt:r.strecke_name, zusatz:r.linie, letzte:r.letzte_befahrung})),
+    ...(va.data||[]).map(r=>({...r, art:'anlage',  objekt_id:r.punkt_id,   objekt:r.punkt_name,   zusatz:r.abk,   letzte:r.letzte_taetigkeit}))
+  ];
 }
 
-/* ---------- Streckenband ---------- */
+/* ============================================================
+   Bausteine
+   ============================================================ */
 function band(s){
   const ids=(s.punkte||[]).filter(id=>punkt(id));
   if(!ids.length) return '<div class="band"><span class="rest">keine Betriebspunkte erfasst</span></div>';
-  let sicht=ids, gekuerzt=0;
-  if(ids.length>6){ sicht=[...ids.slice(0,3),null,...ids.slice(-2)]; gekuerzt=ids.length-5; }
+  let sicht=ids, gek=0;
+  if(ids.length>6){ sicht=[...ids.slice(0,3),null,...ids.slice(-2)]; gek=ids.length-5; }
   let h='<div class="band">';
   sicht.forEach((id,i)=>{
     if(i>0) h+='<span class="schiene"></span>';
-    if(id===null){ h+=`<span class="rest">+${gekuerzt}</span>`; return; }
+    if(id===null){ h+=`<span class="rest">+${gek}</span>`; return; }
     const r=(i===0||i===sicht.length-1)?' rand':'';
     h+=`<span class="bp"><span class="knoten${r}"></span><span class="code${r}">${esc(code(id))}</span></span>`;
   });
   return h+'</div>';
 }
+function gleisfeld(p){
+  const n=(p.abk+p.name).split('').reduce((a,c)=>a+c.charCodeAt(0),0);
+  const breiten=[0,1,2,3].map(i=>34+((n>>(i*3))%9)*7);
+  return `<div class="gleisfeld">${breiten.map(b=>`<i style="width:${b}%"></i>`).join('')}</div>`;
+}
+function fristZeile(z,a,k){
+  const t=a?tageBis(a):null;
+  if(z==='abgelaufen') return `<div class="frist rot">Abgelaufen am <b>${datum(a)}</b> · ${Math.abs(t)} Tage überfällig</div>`;
+  if(z==='warnung')    return `<div class="frist gelb">Gültig bis <b>${datum(a)}</b> · noch ${t} Tage</div>`;
+  if(z==='gueltig'&&a) return `<div class="frist">Gültig bis <b>${datum(a)}</b> · noch ${t} Tage</div>`;
+  if(z==='gueltig')    return `<div class="frist">Kein Datum erfasst — Frist nicht berechenbar</div>`;
+  if(z==='ausbildung') return `<div class="frist">In Ausbildung${k.erwerb?' · seit '+datum(k.erwerb):''}</div>`;
+  return `<div class="frist">Noch keine Kenntnis erfasst</div>`;
+}
+function balken(z,a){
+  if(!a||!['gueltig','warnung','abgelaufen'].includes(z)) return '';
+  const anteil=Math.max(0,Math.min(100,(tageBis(a)/(S.konfig.gueltig_monate*30.4))*100));
+  return `<div class="balken"><i style="width:${anteil.toFixed(1)}%;background:${ZFARBE[z]}"></i></div>`;
+}
 
 function streckeKarte(s){
-  const z=zustand(s.id), a=ablauf(s.id), t=a?tageBis(a):null;
-  let frist;
-  if(z==='abgelaufen') frist=`<div class="frist rot">Abgelaufen am <b>${datum(a)}</b> · ${Math.abs(t)} Tage überfällig</div>`;
-  else if(z==='warnung') frist=`<div class="frist gelb">Gültig bis <b>${datum(a)}</b> · noch ${t} Tage</div>`;
-  else if(z==='gueltig'&&a) frist=`<div class="frist">Gültig bis <b>${datum(a)}</b> · noch ${t} Tage</div>`;
-  else if(z==='gueltig') frist=`<div class="frist">Kein Datum erfasst — Frist nicht berechenbar</div>`;
-  else if(z==='ausbildung') frist=`<div class="frist">In Ausbildung${meineKenntnis(s.id).erwerb?' · seit '+datum(meineKenntnis(s.id).erwerb):''}</div>`;
-  else frist=`<div class="frist">Noch keine Kenntnis erfasst</div>`;
-
-  let balken='';
-  if(a&&['gueltig','warnung','abgelaufen'].includes(z)){
-    const anteil=Math.max(0,Math.min(100,(t/(S.konfig.gueltig_monate*30.4))*100));
-    balken=`<div class="balken"><i style="width:${anteil.toFixed(1)}%;background:${ZFARBE[z]}"></i></div>`;
-  }
-  const darfStamm = istAdmin() || s.erstellt_von===S.user.id;
+  const z=zustandS(s.id), a=ablaufS(s.id);
+  const stamm = istAdmin() || s.erstellt_von===S.user.id;
   return `<div class="karte">
-    <div class="kopfzeile">
-      <span class="lampe ${z}" title="${ZTEXT[z]}"></span>
-      <span class="titel">${esc(s.name)}</span>
-      ${s.linie?`<span class="linienr">${esc(s.linie)}</span>`:''}
-    </div>
-    ${band(s)}${frist}${balken}
+    <div class="kopfzeile"><span class="lampe ${z}" title="${ZTEXT[z]}"></span>
+      <span class="titel">${esc(s.name)}</span>${s.linie?`<span class="linienr">${esc(s.linie)}</span>`:''}</div>
+    ${band(s)}${fristZeile(z,a,kenntnisS(s.id))}${balken(z,a)}
     <div class="aktionen">
       <button class="btn haupt" data-tat="gefahren" data-id="${s.id}">Heute gefahren</button>
-      <button class="btn" data-tat="kenntnis-bearbeiten" data-id="${s.id}">Kenntnis</button>
-      ${darfStamm?`<button class="btn" data-tat="strecke-bearbeiten" data-id="${s.id}">Strecke</button>`:''}
-    </div>
-  </div>`;
+      <button class="btn" data-tat="kenntnis-s" data-id="${s.id}">Kenntnis</button>
+      ${stamm?`<button class="btn" data-tat="strecke-bearbeiten" data-id="${s.id}">Strecke</button>`:''}
+    </div></div>`;
 }
+function anlageKarte(p){
+  const z=zustandA(p.id), a=ablaufA(p.id);
+  const stamm = istAdmin() || p.erstellt_von===S.user.id;
+  const inStrecken=S.strecken.filter(s=>(s.punkte||[]).includes(p.id)).length;
+  return `<div class="karte">
+    <div class="kopfzeile"><span class="lampe ${z}" title="${ZTEXT[z]}"></span>
+      <span class="titel">${esc(p.name)}</span><span class="linienr">${esc(p.abk)}</span></div>
+    ${gleisfeld(p)}
+    <div class="meta">${esc(p.typ||'Bahnhof')}${p.bahn?' · '+esc(p.bahn):''}${inStrecken?` · in ${inStrecken} Strecke(n)`:''}</div>
+    ${fristZeile(z,a,kenntnisA(p.id))}${balken(z,a)}
+    <div class="aktionen">
+      <button class="btn haupt" data-tat="gearbeitet" data-id="${p.id}">Heute gearbeitet</button>
+      <button class="btn" data-tat="kenntnis-a" data-id="${p.id}">Kenntnis</button>
+      ${stamm?`<button class="btn" data-tat="punkt-bearbeiten" data-id="${p.id}">Anlage</button>`:''}
+    </div></div>`;
+}
+
+const FILTERCHIPS=[['alle','Alle'],['gueltig','Gültig'],['warnung','Läuft ab'],['abgelaufen','Abgelaufen'],['ausbildung','Ausbildung'],['keine','Keine']];
+const chips = () => `<div class="chips">${FILTERCHIPS.map(([k,t])=>
+  `<button class="chip ${FILTER===k?'an':''}" data-tat="filter" data-wert="${k}">${k!=='alle'?`<span class="lampe ${k} klein"></span>`:''}${t}</button>`).join('')}</div>`;
 
 /* ============================================================
    Ansichten
    ============================================================ */
 function ansichtUebersicht(){
   const z={gueltig:0,warnung:0,abgelaufen:0,ausbildung:0,keine:0};
-  S.strecken.forEach(s=>z[zustand(s.id)]++);
-  const dringend=S.strecken.filter(s=>['abgelaufen','warnung'].includes(zustand(s.id)))
-    .sort((a,b)=>(ablauf(a.id)||'9999').localeCompare(ablauf(b.id)||'9999'));
+  S.strecken.forEach(s=>z[zustandS(s.id)]++);
+  S.punkte.forEach(p=>z[zustandA(p.id)]++);
+  const dringendS=S.strecken.filter(s=>['abgelaufen','warnung'].includes(zustandS(s.id)))
+    .sort((a,b)=>(ablaufS(a.id)||'9999').localeCompare(ablaufS(b.id)||'9999'));
+  const dringendA=S.punkte.filter(p=>['abgelaufen','warnung'].includes(zustandA(p.id)))
+    .sort((a,b)=>(ablaufA(a.id)||'9999').localeCompare(ablaufA(b.id)||'9999'));
 
-  if(!S.strecken.length){
-    return `<div class="leer"><b>Noch keine Strecken im System</b>
-      Die Strecken sind für alle Mitarbeitenden gemeinsam. Erfasse zuerst Betriebspunkte, dann Strecken.</div>
+  if(!S.strecken.length && !S.punkte.length){
+    return `<div class="leer"><b>Noch keine Stammdaten</b>
+      Anlagen und Strecken sind für alle Mitarbeitenden gemeinsam. Der Administrator kann unter Konto ein Startgerüst laden.</div>
       <div style="height:12px"></div>
-      <button class="btn haupt voll" data-tat="strecke-neu">Erste Strecke erfassen</button>`;
+      <button class="btn haupt voll" data-tat="punkt-neu" style="margin-bottom:8px">Anlage erfassen</button>
+      <button class="btn voll" data-tat="strecke-neu">Strecke erfassen</button>`;
   }
   return `
   <div class="abschnitt">
@@ -340,70 +410,72 @@ function ansichtUebersicht(){
       <div class="kachel"><div class="zahl">${z.ausbildung}</div><div class="bez"><span class="lampe ausbildung klein"></span>Ausbildung</div></div>
     </div>
   </div>
-  <div class="abschnitt">
-    <h2>Braucht Aufmerksamkeit <span class="mono">${dringend.length}</span></h2>
-    ${dringend.length?dringend.map(streckeKarte).join('')
-      :`<div class="leer">Keine Strecke läuft in den nächsten ${S.konfig.warn_tage} Tagen ab.</div>`}
-  </div>
-  <div class="fussnote">Frist = letzte Befahrung plus ${S.konfig.gueltig_monate} Monate. Die Regel gilt für den ganzen Betrieb und wird vom Administrator gesetzt.</div>`;
+  ${dringendS.length?`<div class="abschnitt"><h2>Strecken · Aufmerksamkeit <span class="mono">${dringendS.length}</span></h2>
+    ${dringendS.map(streckeKarte).join('')}</div>`:''}
+  ${dringendA.length?`<div class="abschnitt"><h2>Anlagen · Aufmerksamkeit <span class="mono">${dringendA.length}</span></h2>
+    ${dringendA.map(anlageKarte).join('')}</div>`:''}
+  ${(!dringendS.length&&!dringendA.length)?`<div class="abschnitt"><h2>Aufmerksamkeit</h2>
+    <div class="leer">Nichts läuft in den nächsten ${S.konfig.warn_tage} Tagen ab.</div></div>`:''}
+  <div class="fussnote">Frist = letzte Befahrung beziehungsweise letzter Einsatz plus ${S.konfig.gueltig_monate} Monate. Die Regel gilt für Strecken und Anlagen gleichermassen und wird vom Administrator gesetzt.</div>`;
 }
 
 function ansichtStrecken(){
   const q=SUCHE.toLowerCase();
-  let liste=S.strecken.filter(s=>{
-    if(FILTER!=='alle'&&zustand(s.id)!==FILTER) return false;
+  const liste=S.strecken.filter(s=>{
+    if(FILTER!=='alle'&&zustandS(s.id)!==FILTER) return false;
     if(!q) return true;
-    const c=(s.punkte||[]).map(code).join(' ');
-    return (s.name+' '+(s.linie||'')+' '+c).toLowerCase().includes(q);
+    return (s.name+' '+(s.linie||'')+' '+(s.punkte||[]).map(code).join(' ')).toLowerCase().includes(q);
   });
   const rang={abgelaufen:0,warnung:1,ausbildung:2,gueltig:3,keine:4};
-  liste.sort((a,b)=>rang[zustand(a.id)]-rang[zustand(b.id)]||a.name.localeCompare(b.name,'de'));
-  const f=[['alle','Alle'],['gueltig','Gültig'],['warnung','Läuft ab'],['abgelaufen','Abgelaufen'],['ausbildung','Ausbildung'],['keine','Keine']];
-  return `
-  <input class="suche" id="suchfeld" placeholder="Strecke, Linie oder Betriebspunkt suchen" value="${esc(SUCHE)}">
-  <div class="chips">${f.map(([k,t])=>`<button class="chip ${FILTER===k?'an':''}" data-tat="filter" data-wert="${k}">${k!=='alle'?`<span class="lampe ${k} klein"></span>`:''}${t}</button>`).join('')}</div>
+  liste.sort((a,b)=>rang[zustandS(a.id)]-rang[zustandS(b.id)]||a.name.localeCompare(b.name,'de'));
+  return `<input class="suche" id="suchfeld" placeholder="Strecke, Linie oder Betriebspunkt suchen" value="${esc(SUCHE)}">
+  ${chips()}
   <button class="btn haupt voll" data-tat="strecke-neu" style="margin-bottom:12px">Strecke erfassen</button>
   ${liste.length?liste.map(streckeKarte).join(''):`<div class="leer"><b>Keine Treffer</b>Suche oder Filter anpassen.</div>`}`;
 }
 
-function ansichtPunkte(){
+function ansichtAnlagen(){
   const q=SUCHE.toLowerCase();
-  const liste=S.punkte.filter(p=>(p.abk+' '+p.name+' '+(p.bahn||'')).toLowerCase().includes(q))
-    .sort((a,b)=>a.name.localeCompare(b.name,'de'));
-  const anz=p=>S.strecken.filter(s=>(s.punkte||[]).includes(p.id)).length;
-  return `
-  <input class="suche" id="suchfeld" placeholder="Betriebspunkt oder Abkürzung suchen" value="${esc(SUCHE)}">
-  <button class="btn haupt voll" data-tat="punkt-neu" style="margin-bottom:12px">Betriebspunkt erfassen</button>
-  ${liste.length?`<div class="liste">${liste.map(p=>`
-    <div class="punkt" data-tat="punkt-bearbeiten" data-id="${p.id}">
-      <span class="abk">${esc(p.abk)}</span>
-      <span class="txt"><span class="n">${esc(p.name)}</span>
-      <span class="m">${esc(p.typ||'Bahnhof')}${p.bahn?' · '+esc(p.bahn):''} · ${anz(p)}× in Strecken</span></span>
-    </div>`).join('')}</div>`:`<div class="leer"><b>Keine Betriebspunkte</b>Bahnhöfe, Haltestellen, Abzweigungen und Anschlussgleise mit ihrer offiziellen Abkürzung erfassen.</div>`}
-  <div class="fussnote" style="margin-top:14px">Betriebspunkte und Strecken sind gemeinsame Stammdaten für alle Mitarbeitenden.</div>`;
+  const liste=S.punkte.filter(p=>{
+    if(FILTER!=='alle'&&zustandA(p.id)!==FILTER) return false;
+    if(!q) return true;
+    return (p.abk+' '+p.name+' '+(p.bahn||'')+' '+(p.typ||'')).toLowerCase().includes(q);
+  });
+  const rang={abgelaufen:0,warnung:1,ausbildung:2,gueltig:3,keine:4};
+  liste.sort((a,b)=>rang[zustandA(a.id)]-rang[zustandA(b.id)]||a.name.localeCompare(b.name,'de'));
+  return `<input class="suche" id="suchfeld" placeholder="Anlage, Abkürzung oder Typ suchen" value="${esc(SUCHE)}">
+  ${chips()}
+  <button class="btn haupt voll" data-tat="punkt-neu" style="margin-bottom:12px">Anlage erfassen</button>
+  ${liste.length?liste.map(anlageKarte).join(''):`<div class="leer"><b>Keine Treffer</b>Anlagen sind Bahnhöfe, Rangierbahnhöfe, Anschlussgleise und Abstellanlagen.</div>`}`;
 }
 
-function ansichtFahrten(){
-  const liste=[...S.fahrten].sort((a,b)=>b.datum.localeCompare(a.datum)).slice(0,80);
-  const name=id=>(S.strecken.find(s=>s.id===id)||{}).name||'Gelöschte Strecke';
+function ansichtJournal(){
+  const nameS=id=>(S.strecken.find(s=>s.id===id)||{}).name||'Gelöschte Strecke';
+  const nameA=id=>(punkt(id)||{}).name||'Gelöschte Anlage';
+  const fahrten=JOURNAL==='fahrten';
+  const liste=(fahrten?S.fahrten:S.einsaetze).slice().sort((a,b)=>b.datum.localeCompare(a.datum)).slice(0,80);
   return `
-  <button class="btn haupt voll" data-tat="fahrt-neu" style="margin-bottom:14px">Fahrt eintragen</button>
-  <div class="abschnitt"><h2>Mein Fahrtenbuch <span class="mono">${S.fahrten.length}</span></h2>
-  ${liste.length?`<div class="liste">${liste.map(f=>`
-    <div class="punkt">
-      <span class="abk">${esc(datum(f.datum).slice(0,5))}</span>
-      <span class="txt"><span class="n">${esc(name(f.strecke_id))}</span>
-      <span class="m">${f.richtung==='rueck'?'Rückrichtung':'Hinrichtung'}${f.zug?' · Zug '+esc(f.zug):''}${f.fahrzeug?' · '+esc(f.fahrzeug):''}</span></span>
-      <button class="btn klein gefahr" data-tat="fahrt-loeschen" data-id="${f.id}">Löschen</button>
-    </div>`).join('')}</div>`:`<div class="leer"><b>Noch keine Fahrten</b>Jeder Eintrag setzt die Frist der Strecke neu.</div>`}</div>`;
+  <div class="chips">
+    <button class="chip ${fahrten?'an':''}" data-tat="journal" data-wert="fahrten">Fahrten <span class="mono">${S.fahrten.length}</span></button>
+    <button class="chip ${!fahrten?'an':''}" data-tat="journal" data-wert="einsaetze">Einsätze <span class="mono">${S.einsaetze.length}</span></button>
+  </div>
+  <button class="btn haupt voll" data-tat="${fahrten?'fahrt-neu':'einsatz-neu'}" style="margin-bottom:14px">${fahrten?'Fahrt eintragen':'Einsatz eintragen'}</button>
+  ${liste.length?`<div class="liste">${liste.map(e=>`
+    <div class="punkt"><span class="abk">${esc(datum(e.datum).slice(0,5))}</span>
+      <span class="txt"><span class="n">${esc(fahrten?nameS(e.strecke_id):nameA(e.punkt_id))}</span>
+      <span class="m">${fahrten
+        ? (e.richtung==='rueck'?'Rückrichtung':'Hinrichtung')+(e.zug?' · Zug '+esc(e.zug):'')+(e.fahrzeug?' · '+esc(e.fahrzeug):'')
+        : esc(e.taetigkeit||'Einsatz')+(e.schicht?' · '+esc(e.schicht):'')}</span></span>
+      <button class="btn klein gefahr" data-tat="${fahrten?'fahrt-loeschen':'einsatz-loeschen'}" data-id="${e.id}">Löschen</button>
+    </div>`).join('')}</div>`
+    :`<div class="leer"><b>Noch keine Einträge</b>Jeder Eintrag setzt die Frist des betroffenen Objekts neu.</div>`}`;
 }
 
-/* ---------- Team (nur Administratoren) ---------- */
 function ansichtTeam(){
   if(!istAdmin()) return `<div class="leer"><b>Kein Zugriff</b>Diese Auswertung ist Administratoren vorbehalten.</div>`;
   const q=SUCHE.toLowerCase();
-  const zaehlen=zeilen=>{ const z={gueltig:0,warnung:0,abgelaufen:0,ausbildung:0};
-    zeilen.forEach(r=>{ if(z[r.zustand]!==undefined) z[r.zustand]++; }); return z; };
+  const zaehlen=r=>{ const z={gueltig:0,warnung:0,abgelaufen:0,ausbildung:0};
+    r.forEach(x=>{ if(z[x.zustand]!==undefined) z[x.zustand]++; }); return z; };
   const ampel=z=>`<span class="ampel">
     <span><span class="lampe gueltig klein"></span>${z.gueltig}</span>
     <span><span class="lampe warnung klein"></span>${z.warnung}</span>
@@ -411,42 +483,45 @@ function ansichtTeam(){
 
   let inhalt;
   if(TEAMMODUS==='mitarbeiter'){
-    const leute=S.teamProfile.filter(p=>(p.name+' '+p.personalnummer+' '+(p.depot||'')).toLowerCase().includes(q));
+    const leute=S.teamProfile.filter(p=>((p.name||'')+' '+(p.personalnummer||'')+' '+(p.depot||'')).toLowerCase().includes(q));
     inhalt=leute.length?`<div class="liste">${leute.map(p=>{
       const z=zaehlen(S.teamStand.filter(r=>r.benutzer_id===p.id));
       return `<div class="punkt" data-tat="team-person" data-id="${p.id}">
         <span class="abk">${esc((p.personalnummer||'—').slice(0,6))}</span>
-        <span class="txt"><span class="n">${esc(p.name||'Ohne Namen')} ${p.rolle==='admin'?'<span class="rollenschild admin">ADMIN</span>':''}</span>
-        <span class="m">${esc(p.depot||'kein Depot')}</span></span>${ampel(z)}
+        <span class="txt"><span class="n">${esc(p.name||'Ohne Namen')}</span>
+        <span class="m">${FUNKTION[fkt(p)]}${p.depot?' · '+esc(p.depot):''}${p.rolle==='admin'?' · Administrator':''}</span></span>${ampel(z)}
       </div>`;}).join('')}</div>`:`<div class="leer">Keine Mitarbeitenden gefunden.</div>`;
   } else {
-    const str=S.strecken.filter(s=>(s.name+' '+(s.linie||'')).toLowerCase().includes(q))
-      .sort((a,b)=>a.name.localeCompare(b.name,'de'));
-    inhalt=str.length?`<div class="liste">${str.map(s=>{
-      const z=zaehlen(S.teamStand.filter(r=>r.strecke_id===s.id));
-      return `<div class="punkt" data-tat="team-strecke" data-id="${s.id}">
-        <span class="abk">${esc(s.linie||'—')}</span>
-        <span class="txt"><span class="n">${esc(s.name)}</span>
+    const objekte = TEAMMODUS==='strecke'
+      ? S.strecken.filter(s=>(s.name+' '+(s.linie||'')).toLowerCase().includes(q))
+          .map(s=>({id:s.id,name:s.name,zusatz:s.linie||'—',art:'strecke'}))
+      : S.punkte.filter(p=>(p.name+' '+p.abk).toLowerCase().includes(q))
+          .map(p=>({id:p.id,name:p.name,zusatz:p.abk,art:'anlage'}));
+    objekte.sort((a,b)=>a.name.localeCompare(b.name,'de'));
+    inhalt=objekte.length?`<div class="liste">${objekte.map(o=>{
+      const z=zaehlen(S.teamStand.filter(r=>r.objekt_id===o.id&&r.art===o.art));
+      return `<div class="punkt" data-tat="team-objekt" data-id="${o.id}" data-wert="${o.art}">
+        <span class="abk">${esc(o.zusatz)}</span>
+        <span class="txt"><span class="n">${esc(o.name)}</span>
         <span class="m">${z.gueltig} von ${S.teamProfile.length} Mitarbeitenden einsatzbereit</span></span>${ampel(z)}
-      </div>`;}).join('')}</div>`:`<div class="leer">Keine Strecken gefunden.</div>`;
+      </div>`;}).join('')}</div>`:`<div class="leer">Nichts gefunden.</div>`;
   }
 
-  const gesamt=zaehlen(S.teamStand);
+  const g=zaehlen(S.teamStand);
   return `
-  <div class="abschnitt">
-    <h2>Betriebsübersicht · ${S.teamProfile.length} Konten</h2>
+  <div class="abschnitt"><h2>Betriebsübersicht · ${S.teamProfile.length} Konten</h2>
     <div class="kacheln">
-      <div class="kachel"><div class="zahl">${gesamt.gueltig}</div><div class="bez"><span class="lampe gueltig klein"></span>Gültig</div></div>
-      <div class="kachel"><div class="zahl">${gesamt.warnung}</div><div class="bez"><span class="lampe warnung klein"></span>Läuft ab</div></div>
-      <div class="kachel"><div class="zahl">${gesamt.abgelaufen}</div><div class="bez"><span class="lampe abgelaufen klein"></span>Abgelaufen</div></div>
-      <div class="kachel"><div class="zahl">${gesamt.ausbildung}</div><div class="bez"><span class="lampe ausbildung klein"></span>Ausbildung</div></div>
-    </div>
-  </div>
+      <div class="kachel"><div class="zahl">${g.gueltig}</div><div class="bez"><span class="lampe gueltig klein"></span>Gültig</div></div>
+      <div class="kachel"><div class="zahl">${g.warnung}</div><div class="bez"><span class="lampe warnung klein"></span>Läuft ab</div></div>
+      <div class="kachel"><div class="zahl">${g.abgelaufen}</div><div class="bez"><span class="lampe abgelaufen klein"></span>Abgelaufen</div></div>
+      <div class="kachel"><div class="zahl">${g.ausbildung}</div><div class="bez"><span class="lampe ausbildung klein"></span>Ausbildung</div></div>
+    </div></div>
   <div class="chips">
     <button class="chip ${TEAMMODUS==='mitarbeiter'?'an':''}" data-tat="teammodus" data-wert="mitarbeiter">Nach Mitarbeiter</button>
     <button class="chip ${TEAMMODUS==='strecke'?'an':''}" data-tat="teammodus" data-wert="strecke">Nach Strecke</button>
+    <button class="chip ${TEAMMODUS==='anlage'?'an':''}" data-tat="teammodus" data-wert="anlage">Nach Anlage</button>
   </div>
-  <input class="suche" id="suchfeld" placeholder="${TEAMMODUS==='mitarbeiter'?'Name, Personalnummer oder Depot':'Strecke oder Linie'}" value="${esc(SUCHE)}">
+  <input class="suche" id="suchfeld" placeholder="${TEAMMODUS==='mitarbeiter'?'Name, Personalnummer oder Depot':'Bezeichnung suchen'}" value="${esc(SUCHE)}">
   ${inhalt}
   <div class="aktionen" style="margin-top:14px">
     <button class="btn" data-tat="team-csv">Auswertung als CSV</button>
@@ -457,72 +532,69 @@ function ansichtTeam(){
 function ansichtKonto(){
   const p=S.profil;
   return `
-  <div class="abschnitt">
-    <h2>Mein Konto</h2>
+  <div class="abschnitt"><h2>Mein Konto</h2>
     <div class="karte">
       <div class="kopfzeile" style="margin-bottom:12px">
         <span class="titel">${esc(p.name||'Ohne Namen')}</span>
-        <span class="rollenschild ${p.rolle==='admin'?'admin':''}">${p.rolle==='admin'?'ADMINISTRATOR':'LOKFÜHRER'}</span>
+        <span class="rollenschild ${p.rolle==='admin'?'admin':''}">${p.rolle==='admin'?'ADMINISTRATOR':FKURZ[fkt(p)]}</span>
       </div>
       <label><span>Name</span><input id="k-name" value="${esc(p.name)}"></label>
+      <label><span>Funktion</span><select id="k-funktion">
+        ${Object.entries(FUNKTION).map(([w,t])=>`<option value="${w}"${fkt(p)===w?' selected':''}>${t}</option>`).join('')}
+      </select></label>
       <div class="zweispaltig">
         <label><span>Personalnummer</span><input id="k-pnr" value="${esc(p.personalnummer)}"></label>
         <label><span>Depot</span><input id="k-depot" value="${esc(p.depot||'')}"></label>
       </div>
       <div class="fussnote" style="margin-bottom:12px">Angemeldet als ${esc(S.user.email)}</div>
       <button class="btn haupt voll" data-tat="profil-sichern">Angaben sichern</button>
-    </div>
-  </div>
+    </div></div>
 
   ${istAdmin()?`
-  <div class="abschnitt">
-    <h2>Fristenregel des Betriebs</h2>
+  <div class="abschnitt"><h2>Fristenregel des Betriebs</h2>
     <div class="karte">
       <div class="zweispaltig">
         <label><span>Gültigkeit in Monaten</span><input type="number" min="1" max="60" id="e-monate" value="${S.konfig.gueltig_monate}"></label>
         <label><span>Warnung ab Tagen</span><input type="number" min="1" max="365" id="e-warn" value="${S.konfig.warn_tage}"></label>
       </div>
-      <div class="hinweis">Gilt für alle Mitarbeitenden. Wert gegen die Weisung des EVU prüfen.</div>
+      <div class="hinweis">Gilt für Strecken- und Anlagenkenntnis aller Mitarbeitenden. Wert gegen die Weisung des EVU prüfen.</div>
       <button class="btn haupt voll" data-tat="konfig-sichern">Regel übernehmen</button>
-    </div>
-  </div>
-  <div class="abschnitt">
-    <h2>Konten und Rollen</h2>
+    </div></div>
+  <div class="abschnitt"><h2>Konten und Rollen</h2>
     <div class="liste">${S.teamProfile.map(u=>`
-      <div class="punkt">
-        <span class="abk">${esc((u.personalnummer||'—').slice(0,6))}</span>
-        <span class="txt"><span class="n">${esc(u.name||'Ohne Namen')}</span><span class="m">${u.rolle==='admin'?'Administrator':'Lokführer'}${u.depot?' · '+esc(u.depot):''}</span></span>
+      <div class="punkt"><span class="abk">${esc((u.personalnummer||'—').slice(0,6))}</span>
+        <span class="txt"><span class="n">${esc(u.name||'Ohne Namen')}</span>
+        <span class="m">${FUNKTION[fkt(u)]}${u.rolle==='admin'?' · Administrator':''}${u.depot?' · '+esc(u.depot):''}</span></span>
         ${u.id!==S.user.id?`<button class="btn klein" data-tat="rolle-tauschen" data-id="${u.id}" data-wert="${u.rolle==='admin'?'lokfuehrer':'admin'}">${u.rolle==='admin'?'Rechte entziehen':'Zum Admin'}</button>`:'<span class="rollenschild">DU</span>'}
-      </div>`).join('')}</div>
-  </div>
-  <div class="abschnitt">
-    <h2>Stammdaten</h2>
+      </div>`).join('')}</div></div>
+  <div class="abschnitt"><h2>Stammdaten</h2>
     <div class="karte">
       <div class="hinweis" style="margin:0 0 10px">Lädt 36 Betriebspunkte und 8 Hauptstrecken als Startgerüst. <b>Die Abkürzungen sind Beispielwerte und vor dem produktiven Einsatz gegen die offizielle Betriebspunktliste zu prüfen.</b></div>
       <button class="btn voll" data-tat="beispiel">Beispieldaten in die Datenbank laden</button>
-    </div>
-  </div>`:''}
+    </div></div>`:''}
 
-  <div class="abschnitt">
-    <button class="btn voll gefahr" data-tat="abmelden">Abmelden</button>
-  </div>`;
+  <div class="abschnitt"><button class="btn voll gefahr" data-tat="abmelden">Abmelden</button></div>`;
 }
 
-/* ============================================================
-   Anmeldung
-   ============================================================ */
 function ansichtTor(){
   const reg = TORMODUS==='registrieren';
   return `<div class="tor">
+    <img src="logo.png" alt="Swiss Rail Connections" class="logo-bild"
+         onerror="this.remove();var t=document.getElementById('tor-text');if(t)t.hidden=false">
+    <h1 id="tor-text" hidden>Swiss Rail Connections</h1>
     <div class="logo">SCHWEIZERISCHES EISENBAHNNETZ</div>
-    <h1>Streckenkenntnis</h1>
-    <div class="unter">Register für Streckenkenntnisse. Jede Mitarbeiterin und jeder Mitarbeiter führt den eigenen Stand; die Geschäftsleitung sieht die Auswertung über alle Konten.</div>
+    <div class="unter" style="margin-top:10px">Kenntnisregister für Lokführer und Rangierleiter — Strecken und Anlagen. Jede Mitarbeiterin und jeder Mitarbeiter führt den eigenen Stand; die Geschäftsleitung sieht die Auswertung über alle Konten.</div>
     <div class="wechsel">
       <button class="${!reg?'an':''}" data-tat="tormodus" data-wert="anmelden">Anmelden</button>
       <button class="${reg?'an':''}" data-tat="tormodus" data-wert="registrieren">Konto erstellen</button>
     </div>
     ${reg?`
       <label><span>Name</span><input id="a-name" placeholder="Vorname Nachname" autocomplete="name"></label>
+      <label><span>Funktion</span><select id="a-funktion">
+        <option value="lokfuehrer">Lokführer</option>
+        <option value="rangierleiter">Rangierleiter</option>
+        <option value="beides">Lokführer und Rangierleiter</option>
+      </select></label>
       <div class="zweispaltig">
         <label><span>Personalnummer</span><input id="a-pnr" placeholder="12345"></label>
         <label><span>Depot</span><input id="a-depot" placeholder="Olten"></label>
@@ -531,8 +603,8 @@ function ansichtTor(){
     <label><span>Passwort</span><input id="a-pw" type="password" autocomplete="${reg?'new-password':'current-password'}" placeholder="mindestens 8 Zeichen"></label>
     <button class="btn haupt voll" data-tat="${reg?'registrieren':'anmelden'}">${reg?'Konto erstellen':'Anmelden'}</button>
     <div class="gleis"></div>
-    <div class="statuszeile" id="statuszeile"></div>
-    <div class="fussnote">Das erste erstellte Konto erhält automatisch Administratorrechte. Alle weiteren Konten starten als Lokführer.</div>
+    <div class="statuszeile" id="torstatus"></div>
+    <div class="fussnote">Das erste erstellte Konto erhält automatisch Administratorrechte.</div>
   </div>`;
 }
 
@@ -545,6 +617,28 @@ function blattOeffnen(titel, inhalt, nachher){
   if(nachher) nachher();
 }
 function blattZu(){ $('hintergrund').hidden=true; document.body.style.overflow=''; ENTWURF=null; }
+
+function formularKenntnis(art, id){
+  const istS = art==='strecke';
+  const o = istS ? S.strecken.find(x=>x.id===id) : punkt(id);
+  if(!o) return;
+  const k = istS ? kenntnisS(id) : kenntnisA(id);
+  blattOeffnen((istS?'Streckenkenntnis — ':'Anlagenkenntnis — ')+o.name,()=>`
+    <label><span>Stand der Kenntnis</span>
+      <select id="k-status">
+        <option value="keine"${k.status==='keine'?' selected':''}>Keine Kenntnis</option>
+        <option value="ausbildung"${k.status==='ausbildung'?' selected':''}>In Ausbildung</option>
+        <option value="vorhanden"${k.status==='vorhanden'?' selected':''}>Kenntnis vorhanden</option>
+      </select></label>
+    <div class="zweispaltig">
+      <label><span>Erworben am</span><input type="date" id="k-erwerb" value="${esc(k.erwerb||'')}"></label>
+      <label><span>${istS?'Letzte Befahrung':'Letzter Einsatz'}</span><input type="date" id="k-letzte" value="${esc(k.letzte||'')}"></label>
+    </div>
+    <div class="hinweis">Spätere Einträge im Journal überschreiben dieses Datum automatisch.</div>
+    <label><span>Persönliche Notiz</span><textarea id="k-notiz" placeholder="${istS?'Prüfungsdatum, Begleitperson':'Gleisfeld, Bedienvorschrift, Besonderheiten'}">${esc(k.notiz||'')}</textarea></label>
+    <button class="btn haupt voll" data-tat="kenntnis-sichern" data-id="${id}" data-wert="${art}">Kenntnis sichern</button>
+  `);
+}
 
 function formularStrecke(id){
   const s=id?S.strecken.find(x=>x.id===id):null;
@@ -561,7 +655,7 @@ function formularStrecke(id){
     <div class="bpwahl" id="f-bpliste"></div>
     <select id="f-bpwahl" style="margin-bottom:12px"><option value="">Betriebspunkt hinzufügen …</option>
       ${S.punkte.slice().sort((a,b)=>a.name.localeCompare(b.name,'de')).map(p=>`<option value="${p.id}">${esc(p.abk)} — ${esc(p.name)}</option>`).join('')}</select>
-    <label><span>Notizen zur Strecke</span><textarea id="f-notiz" placeholder="Signalstandorte, Langsamfahrstellen">${esc(ENTWURF.notiz)}</textarea></label>
+    <label><span>Notizen zur Strecke</span><textarea id="f-notiz">${esc(ENTWURF.notiz)}</textarea></label>
     <button class="btn haupt voll" data-tat="strecke-sichern" style="margin-bottom:8px">Strecke sichern</button>
     ${s?`<button class="btn voll gefahr" data-tat="strecke-loeschen" data-id="${s.id}">Strecke löschen</button>`:''}
   `, zeichneBpWahl);
@@ -573,40 +667,21 @@ function zeichneBpWahl(){
     :'<span class="platzhalter">Noch keine Betriebspunkte gewählt</span>';
 }
 
-function formularKenntnis(sid){
-  const s=S.strecken.find(x=>x.id===sid); if(!s) return;
-  const k=meineKenntnis(sid);
-  blattOeffnen('Meine Kenntnis — '+s.name,()=>`
-    <label><span>Stand der Kenntnis</span>
-      <select id="k-status">
-        <option value="keine"${k.status==='keine'?' selected':''}>Keine Kenntnis</option>
-        <option value="ausbildung"${k.status==='ausbildung'?' selected':''}>In Ausbildung</option>
-        <option value="vorhanden"${k.status==='vorhanden'?' selected':''}>Kenntnis vorhanden</option>
-      </select></label>
-    <div class="zweispaltig">
-      <label><span>Erworben am</span><input type="date" id="k-erwerb" value="${esc(k.erwerb||'')}"></label>
-      <label><span>Letzte Befahrung</span><input type="date" id="k-letzte" value="${esc(k.letzte_befahrung||'')}"></label>
-    </div>
-    <div class="hinweis">Spätere Einträge im Fahrtenbuch überschreiben die letzte Befahrung automatisch.</div>
-    <label><span>Persönliche Notiz</span><textarea id="k-notiz" placeholder="Prüfungsdatum, Begleitperson, Eigenheiten">${esc(k.notiz||'')}</textarea></label>
-    <button class="btn haupt voll" data-tat="kenntnis-sichern" data-id="${sid}">Kenntnis sichern</button>
-  `);
-}
-
 function formularPunkt(id){
-  const p=id?S.punkte.find(x=>x.id===id):null;
+  const p=id?punkt(id):null;
   ENTWURF=p?{...p}:{id:null,abk:'',name:'',typ:'Bahnhof',bahn:'',notiz:''};
-  const typen=['Bahnhof','Haltestelle','Abzweigung','Anschlussgleis','Betriebsausweichstelle','Dienststation','Depot / Abstellanlage','Grenzpunkt','Tunnelportal'];
-  blattOeffnen(p?'Betriebspunkt bearbeiten':'Betriebspunkt erfassen',()=>`
+  const typen=['Bahnhof','Rangierbahnhof','Haltestelle','Abzweigung','Anschlussgleis','Abstellanlage','Betriebsausweichstelle','Dienststation','Depot / Werkstätte','Grenzpunkt','Tunnelportal'];
+  blattOeffnen(p?'Anlage bearbeiten':'Anlage erfassen',()=>`
+    <div class="hinweis">Anlagen sind gemeinsame Stammdaten und dienen zugleich als Betriebspunkte der Strecken.</div>
     <div class="zweispaltig">
       <label><span>Abkürzung</span><input id="p-abk" value="${esc(ENTWURF.abk)}" maxlength="8" placeholder="OL" style="font-family:var(--mono);text-transform:uppercase"></label>
       <label><span>Typ</span><select id="p-typ">${typen.map(t=>`<option${ENTWURF.typ===t?' selected':''}>${t}</option>`).join('')}</select></label>
     </div>
     <label><span>Name</span><input id="p-name" value="${esc(ENTWURF.name)}" placeholder="Olten"></label>
     <label><span>Infrastrukturbetreiberin</span><input id="p-bahn" value="${esc(ENTWURF.bahn)}" placeholder="SBB, BLS, SOB, RhB …"></label>
-    <label><span>Notizen</span><textarea id="p-notiz">${esc(ENTWURF.notiz)}</textarea></label>
-    <button class="btn haupt voll" data-tat="punkt-sichern" style="margin-bottom:8px">Betriebspunkt sichern</button>
-    ${p?`<button class="btn voll gefahr" data-tat="punkt-loeschen" data-id="${p.id}">Betriebspunkt löschen</button>`:''}
+    <label><span>Notizen</span><textarea id="p-notiz" placeholder="Gleisanlage, Bedienvorschriften">${esc(ENTWURF.notiz)}</textarea></label>
+    <button class="btn haupt voll" data-tat="punkt-sichern" style="margin-bottom:8px">Anlage sichern</button>
+    ${p?`<button class="btn voll gefahr" data-tat="punkt-loeschen" data-id="${p.id}">Anlage löschen</button>`:''}
   `);
 }
 
@@ -626,7 +701,20 @@ function formularFahrt(){
     <button class="btn haupt voll" data-tat="fahrt-sichern">Fahrt sichern</button>
   `);
 }
-
+function formularEinsatz(){
+  if(!S.punkte.length){ blattOeffnen('Einsatz eintragen',()=>`<div class="leer"><b>Keine Anlagen vorhanden</b>Zuerst eine Anlage erfassen.</div>`); return; }
+  const taet=['Rangierdienst','Zugvorbereitung','Bedienfahrt Anschlussgleis','Abstellen / Bereitstellen','Bremsprobe','Ausbildungseinsatz'];
+  blattOeffnen('Einsatz eintragen',()=>`
+    <label><span>Anlage</span><select id="n-punkt">${S.punkte.slice().sort((a,b)=>a.name.localeCompare(b.name,'de')).map(p=>`<option value="${p.id}">${esc(p.abk)} — ${esc(p.name)}</option>`).join('')}</select></label>
+    <div class="zweispaltig">
+      <label><span>Datum</span><input type="date" id="n-datum" value="${heute()}"></label>
+      <label><span>Schicht</span><select id="n-schicht"><option value="">—</option><option>Früh</option><option>Spät</option><option>Nacht</option></select></label>
+    </div>
+    <label><span>Tätigkeit</span><select id="n-taet">${taet.map(t=>`<option>${t}</option>`).join('')}</select></label>
+    <label><span>Bemerkung</span><textarea id="n-notiz" placeholder="Gleisgruppe, Besonderheiten"></textarea></label>
+    <button class="btn haupt voll" data-tat="einsatz-sichern">Einsatz sichern</button>
+  `);
+}
 function textBlatt(titel,text){
   blattOeffnen(titel,()=>`<textarea id="t-feld" style="min-height:240px;font-family:var(--mono);font-size:12px">${esc(text)}</textarea>
     <button class="btn haupt voll" data-tat="kopieren" style="margin-top:10px">In Zwischenablage</button>`);
@@ -638,23 +726,66 @@ function textBlatt(titel,text){
 const TATEN = {
   'tormodus': e=>{ TORMODUS=e.dataset.wert; zeichnen(); },
   'anmelden': async ()=>{
-    const {error}=await db.auth.signInWithPassword({ email:$('a-mail').value.trim(), password:$('a-pw').value });
-    if(error) fehler(error);
+    const mail=$('a-mail').value.trim(), pw=$('a-pw').value;
+    if(!mail||!pw){ meldung('E-Mail und Passwort angeben', true); return; }
+    meldung('Anmeldung läuft …');
+    try{ const {error}=await db.auth.signInWithPassword({ email:mail, password:pw }); if(error) fehler(error); }
+    catch(e){ fehler(e); }
   },
   'registrieren': async ()=>{
     const mail=$('a-mail').value.trim(), pw=$('a-pw').value;
     if(!mail||pw.length<8){ meldung('E-Mail und Passwort mit mindestens 8 Zeichen angeben', true); return; }
-    const {data,error}=await db.auth.signUp({ email:mail, password:pw, options:{ data:{
-      name:$('a-name').value.trim(), personalnummer:$('a-pnr').value.trim(), depot:$('a-depot').value.trim() }}});
-    if(error){ fehler(error); return; }
-    if(!data.session) meldung('Konto erstellt — bitte E-Mail bestätigen, dann anmelden');
+    meldung('Konto wird erstellt …');
+    try{
+      const {data,error}=await db.auth.signUp({ email:mail, password:pw, options:{ data:{
+        name:$('a-name').value.trim(), personalnummer:$('a-pnr').value.trim(),
+        depot:$('a-depot').value.trim(), funktion:$('a-funktion').value }}});
+      if(error){ fehler(error); return; }
+      if(!data.session) meldung('Konto erstellt — bitte E-Mail bestätigen, dann anmelden');
+    }catch(e){ fehler(e); }
   },
   'abmelden': async ()=>{ await db.auth.signOut(); },
 
   'nav': e=>{ ANSICHT=e.dataset.wert; SUCHE=''; FILTER='alle'; zeichnen(); window.scrollTo(0,0); },
   'filter': e=>{ FILTER=e.dataset.wert; zeichnen(); },
+  'journal': e=>{ JOURNAL=e.dataset.wert; zeichnen(); },
   'teammodus': e=>{ TEAMMODUS=e.dataset.wert; SUCHE=''; zeichnen(); },
   'blatt-zu': blattZu,
+
+  'kenntnis-s': e=>formularKenntnis('strecke', e.dataset.id),
+  'kenntnis-a': e=>formularKenntnis('anlage',  e.dataset.id),
+  'kenntnis-sichern': async e=>{
+    const istS=e.dataset.wert==='strecke';
+    const basis={ benutzer_id:S.user.id, status:$('k-status').value, erwerb:$('k-erwerb').value||null,
+      notiz:$('k-notiz').value.trim(), aktualisiert:new Date().toISOString() };
+    const werte = istS
+      ? {...basis, strecke_id:e.dataset.id, letzte_befahrung:$('k-letzte').value||null}
+      : {...basis, punkt_id:e.dataset.id,   letzte_taetigkeit:$('k-letzte').value||null};
+    const {error}=await db.from(istS?'kenntnis':'anlagenkenntnis')
+      .upsert(werte,{onConflict:istS?'benutzer_id,strecke_id':'benutzer_id,punkt_id'});
+    if(error) return fehler(error);
+    blattZu(); await alleLaden(); zeichnen(); meldung('Kenntnis gesichert');
+  },
+  'gefahren': async e=>{
+    const sid=e.dataset.id;
+    const {error}=await db.from('fahrt').insert({ benutzer_id:S.user.id, strecke_id:sid, datum:heute(),
+      richtung:'hin', notiz:'Schnelleintrag' });
+    if(error) return fehler(error);
+    if(kenntnisS(sid).status!=='vorhanden')
+      await db.from('kenntnis').upsert({ benutzer_id:S.user.id, strecke_id:sid, status:'vorhanden',
+        aktualisiert:new Date().toISOString() },{onConflict:'benutzer_id,strecke_id'});
+    await alleLaden(); zeichnen(); meldung('Fahrt eingetragen — Frist läuft neu');
+  },
+  'gearbeitet': async e=>{
+    const pid=e.dataset.id;
+    const {error}=await db.from('einsatz').insert({ benutzer_id:S.user.id, punkt_id:pid, datum:heute(),
+      taetigkeit:'Rangierdienst', notiz:'Schnelleintrag' });
+    if(error) return fehler(error);
+    if(kenntnisA(pid).status!=='vorhanden')
+      await db.from('anlagenkenntnis').upsert({ benutzer_id:S.user.id, punkt_id:pid, status:'vorhanden',
+        aktualisiert:new Date().toISOString() },{onConflict:'benutzer_id,punkt_id'});
+    await alleLaden(); zeichnen(); meldung('Einsatz eingetragen — Frist läuft neu');
+  },
 
   'strecke-neu': ()=>formularStrecke(null),
   'strecke-bearbeiten': e=>formularStrecke(e.dataset.id),
@@ -680,28 +811,6 @@ const TATEN = {
     if(error) return fehler(error);
     blattZu(); await alleLaden(); zeichnen();
   },
-
-  'kenntnis-bearbeiten': e=>formularKenntnis(e.dataset.id),
-  'kenntnis-sichern': async e=>{
-    const werte={ benutzer_id:S.user.id, strecke_id:e.dataset.id, status:$('k-status').value,
-      erwerb:$('k-erwerb').value||null, letzte_befahrung:$('k-letzte').value||null,
-      notiz:$('k-notiz').value.trim(), aktualisiert:new Date().toISOString() };
-    const {error}=await db.from('kenntnis').upsert(werte,{onConflict:'benutzer_id,strecke_id'});
-    if(error) return fehler(error);
-    blattZu(); await alleLaden(); zeichnen(); meldung('Kenntnis gesichert');
-  },
-  'gefahren': async e=>{
-    const sid=e.dataset.id;
-    const {error}=await db.from('fahrt').insert({ benutzer_id:S.user.id, strecke_id:sid, datum:heute(),
-      richtung:'hin', notiz:'Schnelleintrag' });
-    if(error) return fehler(error);
-    if(meineKenntnis(sid).status!=='vorhanden'){
-      await db.from('kenntnis').upsert({ benutzer_id:S.user.id, strecke_id:sid, status:'vorhanden',
-        aktualisiert:new Date().toISOString() },{onConflict:'benutzer_id,strecke_id'});
-    }
-    await alleLaden(); zeichnen(); meldung('Fahrt eingetragen — Frist läuft neu');
-  },
-
   'punkt-neu': ()=>formularPunkt(null),
   'punkt-bearbeiten': e=>formularPunkt(e.dataset.id),
   'punkt-sichern': async ()=>{
@@ -712,11 +821,11 @@ const TATEN = {
       ? await db.from('betriebspunkt').update(werte).eq('id',ENTWURF.id)
       : await db.from('betriebspunkt').insert(werte);
     if(error) return fehler(error);
-    blattZu(); await alleLaden(); zeichnen(); meldung('Betriebspunkt gesichert');
+    blattZu(); await alleLaden(); zeichnen(); meldung('Anlage gesichert');
   },
   'punkt-loeschen': async e=>{
     const n=S.strecken.filter(s=>(s.punkte||[]).includes(e.dataset.id)).length;
-    if(!confirm(n?`Der Punkt ist in ${n} Strecke(n) eingetragen und wird dort entfernt. Löschen?`:'Betriebspunkt löschen?')) return;
+    if(!confirm(n?`Die Anlage ist in ${n} Strecke(n) eingetragen und wird dort entfernt. Löschen?`:'Anlage samt aller Kenntniseinträge löschen?')) return;
     const {error}=await db.from('betriebspunkt').delete().eq('id',e.dataset.id);
     if(error) return fehler(error);
     blattZu(); await alleLaden(); zeichnen();
@@ -735,9 +844,23 @@ const TATEN = {
     if(error) return fehler(error);
     await alleLaden(); zeichnen();
   },
+  'einsatz-neu': formularEinsatz,
+  'einsatz-sichern': async ()=>{
+    const {error}=await db.from('einsatz').insert({ benutzer_id:S.user.id, punkt_id:$('n-punkt').value,
+      datum:$('n-datum').value||heute(), taetigkeit:$('n-taet').value, schicht:$('n-schicht').value,
+      notiz:$('n-notiz').value.trim() });
+    if(error) return fehler(error);
+    blattZu(); await alleLaden(); zeichnen(); meldung('Einsatz eingetragen');
+  },
+  'einsatz-loeschen': async e=>{
+    const {error}=await db.from('einsatz').delete().eq('id',e.dataset.id);
+    if(error) return fehler(error);
+    await alleLaden(); zeichnen();
+  },
 
   'profil-sichern': async ()=>{
-    const werte={ name:$('k-name').value.trim(), personalnummer:$('k-pnr').value.trim(), depot:$('k-depot').value.trim() };
+    const werte={ name:$('k-name').value.trim(), personalnummer:$('k-pnr').value.trim(),
+      depot:$('k-depot').value.trim(), funktion:$('k-funktion').value };
     const {error}=await db.from('profil').update(werte).eq('id',S.user.id);
     if(error) return fehler(error);
     Object.assign(S.profil,werte); zeichnen(); meldung('Angaben gesichert');
@@ -761,28 +884,31 @@ const TATEN = {
   'team-person': e=>{
     const p=S.teamProfile.find(x=>x.id===e.dataset.id); if(!p) return;
     const zeilen=S.teamStand.filter(r=>r.benutzer_id===p.id)
-      .sort((a,b)=>(a.ablauf||'9999').localeCompare(b.ablauf||'9999'));
+      .sort((a,b)=>(a.art+(a.ablauf||'9999')).localeCompare(b.art+(b.ablauf||'9999')));
     blattOeffnen(p.name||'Konto',()=>zeilen.length?`<div class="liste">${zeilen.map(r=>`
       <div class="punkt"><span class="lampe ${r.zustand}"></span>
-      <span class="txt"><span class="n">${esc(r.strecke_name)}</span>
-      <span class="m">${ZTEXT[r.zustand]||r.zustand}${r.ablauf?' · bis '+datum(r.ablauf):''}${r.letzte_befahrung?' · zuletzt '+datum(r.letzte_befahrung):''}</span></span></div>`).join('')}</div>`
+      <span class="txt"><span class="n">${esc(r.objekt)}</span>
+      <span class="m">${r.art==='strecke'?'Strecke':'Anlage'} · ${ZTEXT[r.zustand]||r.zustand}${r.ablauf?' · bis '+datum(r.ablauf):''}</span></span></div>`).join('')}</div>`
       :`<div class="leer">Für dieses Konto ist noch keine Kenntnis erfasst.</div>`);
   },
-  'team-strecke': e=>{
-    const s=S.strecken.find(x=>x.id===e.dataset.id); if(!s) return;
-    const zeilen=S.teamStand.filter(r=>r.strecke_id===s.id)
+  'team-objekt': e=>{
+    const art=e.dataset.wert;
+    const o = art==='strecke' ? S.strecken.find(x=>x.id===e.dataset.id) : punkt(e.dataset.id);
+    if(!o) return;
+    const zeilen=S.teamStand.filter(r=>r.objekt_id===o.id&&r.art===art)
       .sort((a,b)=>String(a.benutzer_name).localeCompare(String(b.benutzer_name),'de'));
-    blattOeffnen(s.name,()=>zeilen.length?`<div class="liste">${zeilen.map(r=>`
+    blattOeffnen(o.name,()=>zeilen.length?`<div class="liste">${zeilen.map(r=>`
       <div class="punkt"><span class="lampe ${r.zustand}"></span>
       <span class="txt"><span class="n">${esc(r.benutzer_name||'Ohne Namen')}</span>
       <span class="m">${ZTEXT[r.zustand]||r.zustand}${r.ablauf?' · bis '+datum(r.ablauf):''}${r.depot?' · '+esc(r.depot):''}</span></span></div>`).join('')}</div>`
-      :`<div class="leer">Niemand hat für diese Strecke eine Kenntnis erfasst.</div>`);
+      :`<div class="leer">Hierfür hat noch niemand eine Kenntnis erfasst.</div>`);
   },
   'team-csv': ()=>{
-    const z=[['Mitarbeiter','Personalnummer','Depot','Strecke','Linie','Status','Erworben','Letzte Befahrung','Gültig bis','Tage']];
-    S.teamStand.forEach(r=>z.push([r.benutzer_name,r.personalnummer,r.depot,r.strecke_name,r.linie,
-      ZTEXT[r.zustand]||r.zustand,datum(r.erwerb),datum(r.letzte_befahrung),datum(r.ablauf),r.tage_rest ?? '']));
-    textBlatt('Auswertung als CSV', z.map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(';')).join('\n'));
+    const z=[['Mitarbeiter','Personalnummer','Funktion','Depot','Art','Bezeichnung','Kennung','Status','Erworben','Zuletzt','Gültig bis','Tage']];
+    S.teamStand.forEach(r=>z.push([r.benutzer_name,r.personalnummer,FUNKTION[r.funktion]||'',r.depot,
+      r.art==='strecke'?'Strecke':'Anlage',r.objekt,r.zusatz,ZTEXT[r.zustand]||r.zustand,
+      datum(r.erwerb),datum(r.letzte),datum(r.ablauf),r.tage_rest==null?'':r.tage_rest]));
+    textBlatt('Auswertung als CSV', z.map(r=>r.map(c=>`"${String(c==null?'':c).replace(/"/g,'""')}"`).join(';')).join('\n'));
   },
   'kopieren': async ()=>{
     const f=$('t-feld');
@@ -801,13 +927,10 @@ async function beispieldaten(){
     ['SP','Spiez'],['IO','Interlaken Ost'],['BR','Brig'],['VS','Visp'],['FR','Fribourg'],
     ['LS','Lausanne'],['GE','Genève'],['MG','Martigny'],['SIO','Sion'],['BI','Biel/Bienne'],
     ['NE','Neuchâtel'],['SO','Solothurn'],['BD','Burgdorf'],['LT','Langenthal'],['DE','Delémont'],['YV','Yverdon-les-Bains']];
-  const neu=bp.filter(([abk])=>!S.punkte.some(p=>p.abk===abk))
-    .map(([abk,name])=>({abk,name,typ:'Bahnhof',bahn:'SBB'}));
+  const neu=bp.filter(([abk])=>!S.punkte.some(p=>p.abk===abk)).map(([abk,name])=>({abk,name,typ:'Bahnhof',bahn:'SBB'}));
   if(neu.length){ const {error}=await db.from('betriebspunkt').insert(neu); if(error) return fehler(error); }
-
   const {data:alle}=await db.from('betriebspunkt').select('id,abk');
   const karte={}; (alle||[]).forEach(p=>karte[p.abk]=p.id);
-
   const str=[['Basel SBB – Olten (Hauenstein-Basislinie)','500','40',['BS','OL']],
     ['Olten – Bern','450','62',['OL','LT','BD','BN']],
     ['Olten – Zürich HB','650','65',['OL','AA','BG','BAD','ZUE']],
@@ -831,25 +954,23 @@ async function beispieldaten(){
 const TABS=[
   ['uebersicht','Übersicht','<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>'],
   ['strecken','Strecken','<path d="M4 18h16"/><path d="M4 6h16"/><path d="M9 6v12"/><path d="M15 6v12"/>'],
-  ['punkte','Punkte','<circle cx="7" cy="12" r="2.4"/><circle cx="17" cy="12" r="2.4"/><path d="M9.4 12h5.2"/>'],
-  ['fahrten','Fahrten','<rect x="5" y="4" width="14" height="12" rx="2"/><path d="M5 12h14"/><path d="M8 20l1.5-4M16 20l-1.5-4"/>'],
+  ['anlagen','Anlagen','<path d="M3 8h18"/><path d="M3 12h18"/><path d="M3 16h18"/><path d="M8 5v14"/>'],
+  ['journal','Journal','<rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h3"/>'],
   ['team','Team','<circle cx="9" cy="8" r="3"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><circle cx="17" cy="9" r="2.2"/><path d="M15 14.5c2.6-.6 5 1 5 4.5"/>'],
   ['konto','Konto','<circle cx="12" cy="8.5" r="3.2"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/>']
 ];
 
 function zeichnen(){
-  const angemeldet = !!(S.user && S.profil);
-  document.body.classList.toggle('angemeldet', angemeldet);
-  $('kopf').hidden = !angemeldet;
-  $('navigation').hidden = !angemeldet;
-
-  if(!angemeldet){ $('ansicht').innerHTML=ansichtTor(); return; }
+  const an = !!(S.user && S.profil);
+  document.body.classList.toggle('angemeldet', an);
+  $('kopf').hidden = !an; $('navigation').hidden = !an;
+  if(!an){ $('ansicht').innerHTML=ansichtTor(); return; }
 
   if(ANSICHT==='team' && !istAdmin()) ANSICHT='uebersicht';
-  $('kennung').innerHTML = `${esc(S.profil.name||S.user.email)} <span class="rollenschild ${istAdmin()?'admin':''}">${istAdmin()?'ADMIN':'LF'}</span>`;
+  $('kennung').innerHTML = `${esc(S.profil.name||S.user.email)} <span class="rollenschild ${istAdmin()?'admin':''}">${istAdmin()?'ADMIN':FKURZ[fkt(S.profil)]}</span>`;
 
-  const seiten={uebersicht:ansichtUebersicht,strecken:ansichtStrecken,punkte:ansichtPunkte,
-    fahrten:ansichtFahrten,team:ansichtTeam,konto:ansichtKonto};
+  const seiten={uebersicht:ansichtUebersicht,strecken:ansichtStrecken,anlagen:ansichtAnlagen,
+    journal:ansichtJournal,team:ansichtTeam,konto:ansichtKonto};
   $('ansicht').innerHTML=seiten[ANSICHT]();
 
   $('navigation').innerHTML=TABS.filter(([k])=>k!=='team'||istAdmin())
@@ -872,7 +993,12 @@ document.addEventListener('change',ev=>{
     ENTWURF.punkte.push(ev.target.value); ev.target.value=''; zeichneBpWahl();
   }
 });
-document.addEventListener('keydown',ev=>{ if(ev.key==='Escape'&&!$('hintergrund').hidden) blattZu(); });
+document.addEventListener('keydown',ev=>{
+  if(ev.key==='Escape'&&!$('hintergrund').hidden) blattZu();
+  if(ev.key==='Enter'&&ev.target.tagName==='INPUT'&&ev.target.closest('.tor')){
+    ev.preventDefault(); const b=document.querySelector('.tor .btn.haupt'); if(b) b.click();
+  }
+});
 $('hintergrund').addEventListener('click',ev=>{ if(ev.target===$('hintergrund')) blattZu(); });
 
 async function sitzungWechsel(session){
@@ -891,8 +1017,13 @@ async function sitzungWechsel(session){
   zeichnen();
 }
 
-db.auth.onAuthStateChange((_e,session)=>{ sitzungWechsel(session); });
-(async ()=>{ const {data}=await db.auth.getSession(); await sitzungWechsel(data.session); })();
+if(db){
+  db.auth.onAuthStateChange((_e,session)=>{ sitzungWechsel(session); });
+  (async ()=>{
+    try{ const {data}=await db.auth.getSession(); await sitzungWechsel(data.session); }
+    catch(e){ startfehler('Verbindung zu Supabase fehlgeschlagen: '+(e.message||e)); }
+  })();
+}
 </script>
 </body>
 </html>
