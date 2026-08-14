@@ -368,12 +368,16 @@ function balken(z,a){
   return `<div class="balken"><i style="width:${anteil.toFixed(1)}%;background:${ZFARBE[z]}"></i></div>`;
 }
 
+function nummern(s){
+  return (s.linie?`<span class="linienr" title="Streckennummer BAV">${esc(s.linie)}</span>`:'')
+       + (s.tabelle?`<span class="linienr" title="Streckentabelle R 30131" style="border-style:dashed">${esc(s.tabelle)}</span>`:'');
+}
 function streckeKarte(s){
   const z=zustandS(s.id), a=ablaufS(s.id);
   const stamm = istAdmin() || s.erstellt_von===S.user.id;
   return `<div class="karte">
     <div class="kopfzeile"><span class="lampe ${z}" title="${ZTEXT[z]}"></span>
-      <span class="titel">${esc(s.name)}</span>${s.linie?`<span class="linienr">${esc(s.linie)}</span>`:''}</div>
+      <span class="titel">${esc(s.name)}</span>${nummern(s)}</div>
     ${band(s)}${fristZeile(z,a,kenntnisS(s.id))}${balken(z,a)}
     <div class="aktionen">
       <button class="btn haupt" data-tat="gefahren" data-id="${s.id}">Heute gefahren</button>
@@ -445,7 +449,7 @@ function ansichtStrecken(){
   const liste=S.strecken.filter(s=>{
     if(FILTER!=='alle'&&zustandS(s.id)!==FILTER) return false;
     if(!q) return true;
-    return (s.name+' '+(s.linie||'')+' '+(s.punkte||[]).map(code).join(' ')).toLowerCase().includes(q);
+    return (s.name+' '+(s.linie||'')+' '+(s.tabelle||'')+' '+(s.punkte||[]).map(code).join(' ')).toLowerCase().includes(q);
   });
   const rang={abgelaufen:0,warnung:1,ausbildung:2,gueltig:3,keine:4};
   liste.sort((a,b)=>rang[zustandS(a.id)]-rang[zustandS(b.id)]||a.name.localeCompare(b.name,'de'));
@@ -622,9 +626,12 @@ function karteAufbauen(){
   const bahn = L.tileLayer('https://a.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
     { maxZoom:19, opacity:.9, attribution:'© OpenRailwayMap' });
 
+  const bav = L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.bav.schienennetz/default/current/3857/{z}/{x}/{y}.png',
+    { maxZoom:19, opacity:.95, attribution:'© BAV' });
+
   swissGrau.addTo(KARTE); bahn.addTo(KARTE);
   L.control.layers({ 'Landeskarte grau':swissGrau, 'Landeskarte farbig':swissFarbe, 'OpenStreetMap':osm },
-                   { 'Bahnnetz':bahn }, { collapsed:true }).addTo(KARTE);
+                   { 'Bahnnetz (OpenRailwayMap)':bahn, 'Schienennetz BAV':bav }, { collapsed:true }).addTo(KARTE);
 
   /* Strecken als Linien, eingefärbt nach eigenem Kenntnisstand */
   S.strecken.forEach(st=>{
@@ -634,7 +641,7 @@ function karteAufbauen(){
     L.polyline(pfad,{ color:ZHEX[z], weight:z==='keine'?3:5, opacity:z==='keine'?.55:.9,
       dashArray: st.verlauf&&st.verlauf.length>1 ? null : '9 7' })
      .addTo(KARTE)
-     .bindPopup(`<b>${esc(st.name)}</b><span class="pm">${st.linie?esc(st.linie)+' · ':''}STRECKE</span>
+     .bindPopup(`<b>${esc(st.name)}</b><span class="pm">${st.linie?'BAV '+esc(st.linie)+' · ':''}${st.tabelle?'TAB '+esc(st.tabelle)+' · ':''}STRECKE</span>
        ${ZTEXT[z]}${a?' · bis '+datum(a):''}<br>
        <button class="btn klein haupt" data-tat="gefahren" data-id="${st.id}" style="margin-top:8px">Heute gefahren</button>
        <button class="btn klein" data-tat="kenntnis-s" data-id="${st.id}" style="margin-top:8px">Kenntnis</button>`);
@@ -864,14 +871,16 @@ function formularKenntnis(art, id){
 
 function formularStrecke(id){
   const s=id?S.strecken.find(x=>x.id===id):null;
-  ENTWURF=s?{...s,punkte:[...(s.punkte||[])]}:{id:null,name:'',linie:'',km:'',zugsicherung:'',notiz:'',punkte:[]};
+  ENTWURF=s?{...s,punkte:[...(s.punkte||[])]}:{id:null,name:'',linie:'',tabelle:'',km:'',zugsicherung:'',notiz:'',punkte:[]};
   blattOeffnen(s?'Strecke bearbeiten':'Strecke erfassen',()=>`
     <div class="hinweis">Strecken sind gemeinsame Stammdaten. Änderungen sehen alle Mitarbeitenden.</div>
     <label><span>Bezeichnung</span><input id="f-name" value="${esc(ENTWURF.name)}" placeholder="Olten – Bern"></label>
     <div class="zweispaltig">
-      <label><span>Linie / Nummer</span><input id="f-linie" value="${esc(ENTWURF.linie)}" placeholder="450"></label>
-      <label><span>Länge in km</span><input id="f-km" value="${esc(ENTWURF.km)}" inputmode="decimal" placeholder="62"></label>
+      <label><span>Streckennummer BAV</span><input id="f-linie" value="${esc(ENTWURF.linie)}" placeholder="600"></label>
+      <label><span>Streckentabelle R 30131</span><input id="f-tabelle" value="${esc(ENTWURF.tabelle||'')}" placeholder="531"></label>
     </div>
+    <div class="hinweis">Die BAV-Nummer steht auf der Karte an der Linie. Die Streckentabelle ist die betriebliche Nummer aus der Übersicht R 30131.</div>
+    <label><span>Länge in km</span><input id="f-km" value="${esc(ENTWURF.km)}" inputmode="decimal" placeholder="62"></label>
     <label><span>Zugbeeinflussung / Besonderheiten</span><input id="f-zs" value="${esc(ENTWURF.zugsicherung)}" placeholder="ETCS L1 LS, Gefällstrecke"></label>
     <label><span>Betriebspunkte in Fahrrichtung</span></label>
     <div class="bpwahl" id="f-bpliste"></div>
@@ -1065,8 +1074,8 @@ const TATEN = {
   'strecke-sichern': async ()=>{
     const name=$('f-name').value.trim();
     if(!name){ meldung('Bezeichnung fehlt', true); return; }
-    const werte={ name, linie:$('f-linie').value.trim(), km:$('f-km').value.trim(),
-      zugsicherung:$('f-zs').value.trim(), notiz:$('f-notiz').value.trim() };
+    const werte={ name, linie:$('f-linie').value.trim(), tabelle:$('f-tabelle').value.trim(),
+      km:$('f-km').value.trim(), zugsicherung:$('f-zs').value.trim(), notiz:$('f-notiz').value.trim() };
     let sid=ENTWURF.id;
     if(sid){ const {error}=await db.from('strecke').update(werte).eq('id',sid); if(error) return fehler(error); }
     else { const {data,error}=await db.from('strecke').insert(werte).select().single(); if(error) return fehler(error); sid=data.id; }
@@ -1237,32 +1246,35 @@ async function beispieldaten(){
   const {data:alle}=await db.from('betriebspunkt').select('id,abk');
   const karte={}; (alle||[]).forEach(p=>karte[p.abk]=p.id);
 
+  /* [BAV-Streckennummer, Streckentabelle R 30131, Name, km, Betriebspunkte]
+     BAV-Nummern nur dort eingetragen, wo belegt — die übrigen auf der
+     Kartenebene "Schienennetz BAV" ablesen und nachtragen.            */
   const str=[
-    ['111','Genève – Lausanne','60',['GE','LS']],
-    ['211','Lausanne – Sion','107',['LS','MG','SIO']],
-    ['221','Sion – Brig','48',['SIO','VI','BR']],
-    ['222','Brig – Iselle (Simplon)','23',['BR']],
-    ['322','Thun – Spiez – Frutigen','22',['TH','SP','FR']],
-    ['351','Frutigen – Brig (Lötschberg-Bergstrecke)','52',['FR','BR']],
-    ['361','Spiez – Interlaken Ost','25',['SP','IO']],
-    ['371','Bern – Thun','31',['BN','TH']],
-    ['391','Frutigen – Visp (Lötschberg-Basistunnel)','40',['FR','VI']],
-    ['411','Basel SBB – Olten (Hauenstein-Basislinie)','39',['BS','PR','SIS','OL']],
-    ['531','Luzern – Arth-Goldau – Göschenen','76',['LZ','GD','AL','GOE']],
-    ['541','Göschenen – Bellinzona','86',['GOE','BEL']],
-    ['602','Zürich HB – Winterthur','28',['ZUE','OGL','W']],
-    ['711','Winterthur – St. Gallen','58',['W','WL','GSS','SG']],
-    ['','Olten – Bern','62',['OL','LGUT','BDF','BN']],
-    ['','Olten – Zürich HB','65',['OL','AA','BRGG','BAD','ZUE']],
-    ['','Zürich HB – Chur','120',['ZUE','ZB','SA','CH']]
+    ['',   '111','Genève – Lausanne','60',['GE','LS']],
+    ['',   '211','Lausanne – Sion','107',['LS','MG','SIO']],
+    ['',   '221','Sion – Brig','48',['SIO','VI','BR']],
+    ['',   '222','Brig – Iselle (Simplon)','23',['BR']],
+    ['',   '322','Thun – Spiez – Frutigen','22',['TH','SP','FR']],
+    ['',   '351','Frutigen – Brig (Lötschberg-Bergstrecke)','52',['FR','BR']],
+    ['',   '361','Spiez – Interlaken Ost','25',['SP','IO']],
+    ['',   '371','Bern – Thun','31',['BN','TH']],
+    ['',   '391','Frutigen – Visp (Lötschberg-Basistunnel)','40',['FR','VI']],
+    ['',   '411','Basel SBB – Olten (Hauenstein-Basislinie)','39',['BS','PR','SIS','OL']],
+    ['600','531','Luzern – Arth-Goldau – Göschenen','76',['LZ','GD','AL','GOE']],
+    ['600','541','Göschenen – Bellinzona','86',['GOE','BEL']],
+    ['',   '602','Zürich HB – Winterthur','28',['ZUE','OGL','W']],
+    ['',   '711','Winterthur – St. Gallen','58',['W','WL','GSS','SG']],
+    ['',   '',   'Olten – Bern','62',['OL','LGUT','BDF','BN']],
+    ['',   '',   'Olten – Zürich HB','65',['OL','AA','BRGG','BAD','ZUE']],
+    ['',   '',   'Zürich HB – Chur','120',['ZUE','ZB','SA','CH']]
   ];
-  for(const [linie,name,km,codes] of str){
+  for(const [linie,tabelle,name,km,codes] of str){
     if(S.strecken.some(s=>s.name===name)) continue;
-    const {data,error}=await db.from('strecke').insert({name,linie,km}).select().single();
+    const {data,error}=await db.from('strecke').insert({name,linie,tabelle,km}).select().single();
     if(error){ fehler(error); continue; }
     await db.from('strecke_punkt').insert(codes.map((c,i)=>({strecke_id:data.id,punkt_id:karte[c],reihenfolge:i})));
   }
-  meldung('Beispieldaten geladen — drei Strecken ohne Nummer nachtragen');
+  meldung('Beispieldaten geladen — BAV-Nummern nachtragen');
 }
 
 /* ============================================================
