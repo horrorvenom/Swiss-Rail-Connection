@@ -749,7 +749,7 @@ async function koordinateSichern(id, lat, lon){
 /* ============================================================
    Koordinatensuche — swisstopo, sonst OpenStreetMap
    ============================================================ */
-const IN_CH = (la,lo) => la>45.7 && la<47.9 && lo>5.8 && lo<10.6;
+const IN_CH = (la,lo) => la>45.6 && la<48.0 && lo>5.7 && lo<10.7;
 
 function ausAttrs(a){
   if(!a) return null;
@@ -822,11 +822,18 @@ async function gleiseHolen(a,b){
   const w=Math.min(a[1],b[1])-puffer, e=Math.max(a[1],b[1])+puffer;
   const q=`[out:json][timeout:90];way["railway"~"^(rail|light_rail|narrow_gauge)$"]`
         + `["service"!~"."]["railway"!="abandoned"](${s},${w},${n},${e});out geom;`;
-  const r=await fetch('https://overpass-api.de/api/interpreter',
-    { method:'POST', body:'data='+encodeURIComponent(q) });
-  if(!r.ok) throw new Error('Gleisdaten nicht erreichbar ('+r.status+')');
-  const j=await r.json();
-  return j.elements||[];
+  const server=['https://overpass-api.de/api/interpreter',
+                'https://overpass.kumi.systems/api/interpreter'];
+  let letzter='';
+  for(const url of server){
+    try{
+      const r=await fetch(url,{ method:'POST', body:'data='+encodeURIComponent(q) });
+      if(!r.ok){ letzter='Gleisdatenserver antwortet mit '+r.status; continue; }
+      const j=await r.json();
+      return j.elements||[];
+    }catch(e){ letzter='Gleisdatenserver nicht erreichbar'; }
+  }
+  throw new Error(letzter||'Gleisdaten nicht erreichbar');
 }
 
 function graphBauen(ways){
@@ -1101,13 +1108,23 @@ function formularStrecke(id){
     <label><span>Zugbeeinflussung / Besonderheiten</span><input id="f-zs" value="${esc(ENTWURF.zugsicherung)}" placeholder="ETCS L1 LS, Gefällstrecke"></label>
     <label><span>Betriebspunkte in Fahrrichtung</span></label>
     <div class="bpwahl" id="f-bpliste"></div>
-    <select id="f-bpwahl" style="margin-bottom:12px"><option value="">Betriebspunkt hinzufügen …</option>
-      ${S.punkte.slice().sort((a,b)=>a.name.localeCompare(b.name,'de')).map(p=>`<option value="${p.id}">${esc(p.abk)} — ${esc(p.name)}</option>`).join('')}</select>
+    <select id="f-bpwahl" style="margin-bottom:12px">${bpAuswahlHtml()}</select>
     <label><span>Notizen zur Strecke</span><textarea id="f-notiz">${esc(ENTWURF.notiz)}</textarea></label>
     <button class="btn haupt voll" data-tat="strecke-sichern" style="margin-bottom:8px">Strecke sichern</button>
     ${s?`<button class="btn voll gefahr" data-tat="strecke-loeschen" data-id="${s.id}">Strecke löschen</button>`:''}
   `, zeichneBpWahl);
 }
+function bpAuswahlHtml(){
+  const erfasst=S.punkte.slice().sort((a,b)=>a.name.localeCompare(b.name,'de'));
+  const offen=STAMM_BP.filter(([abk])=>!S.punkte.some(p=>p.abk===abk))
+    .slice().sort((a,b)=>a[1].localeCompare(b[1],'de'));
+  return `<option value="">Betriebspunkt hinzufügen …</option>`
+    + (erfasst.length?`<optgroup label="Bereits erfasst">${erfasst.map(p=>
+        `<option value="${p.id}">${esc(p.abk)} — ${esc(p.name)}</option>`).join('')}</optgroup>`:'')
+    + (offen.length?`<optgroup label="Aus dem Verzeichnis — wird beim Wählen angelegt">${offen.map(([abk,name])=>
+        `<option value="neu:${esc(abk)}">${esc(abk)} — ${esc(name)}</option>`).join('')}</optgroup>`:'');
+}
+
 function zeichneBpWahl(){
   const box=$('f-bpliste'); if(!box) return;
   box.innerHTML=ENTWURF.punkte.length
@@ -1235,20 +1252,30 @@ const TATEN = {
     }catch(e){ fehler(e); }
   },
   'verlauf-alle': async ()=>{
+    const zuwenig=S.strecken.filter(st=>darfStamm(st) && !(Array.isArray(st.verlauf)&&st.verlauf.length>1)
+      && (st.punkte||[]).map(punkt).filter(hatKoord).length<2);
     const offen=S.strecken.filter(st=>darfStamm(st) && !(Array.isArray(st.verlauf)&&st.verlauf.length>1)
       && (st.punkte||[]).map(punkt).filter(hatKoord).length>=2);
-    if(!offen.length){ meldung('Alle Strecken haben bereits einen Gleisverlauf'); return; }
-    let ok=0, fehl=0;
+    if(!offen.length && !zuwenig.length){ meldung('Alle Strecken haben bereits einen Gleisverlauf'); return; }
+    let ok=0; const probleme=zuwenig.map(st=>({name:st.name,
+      grund:'Weniger als zwei Betriebspunkte mit Koordinate'}));
     for(const st of offen){
       try{
         const pfad=await verlaufErmitteln(st);
         const {error}=await db.from('strecke').update({verlauf:pfad}).eq('id',st.id);
-        error ? fehl++ : ok++;
-      }catch(e){ fehl++; }
+        if(error) probleme.push({name:st.name, grund:error.message}); else ok++;
+      }catch(e){ probleme.push({name:st.name, grund:(e&&e.message)||String(e)}); }
       await new Promise(r=>setTimeout(r,1200));
     }
     await alleLaden(); zeichnen();
-    meldung(`${ok} Strecken auf die Gleise gelegt${fehl?', '+fehl+' nicht ermittelbar':''}`, fehl>0);
+    if(!probleme.length){ meldung(`${ok} Strecken auf die Gleise gelegt`); return; }
+    meldung(`${ok} gelegt, ${probleme.length} offen`, true);
+    blattOeffnen('Nicht ermittelbar',()=>`
+      <div class="hinweis">Bei diesen Strecken konnte kein Gleisverlauf berechnet werden. Sie bleiben gestrichelt und lassen sich im Modus «Verlauf zeichnen» von Hand nachtragen.</div>
+      <div class="liste">${probleme.map(x=>`<div class="punkt">
+        <span class="lampe warnung"></span>
+        <span class="txt"><span class="n">${esc(x.name)}</span><span class="m">${esc(x.grund)}</span></span>
+      </div>`).join('')}</div>`);
   },
   'verlauf-leeren': ()=>{ VERLAUF=[]; zeichnen(); },
   'verlauf-sichern': async ()=>{
@@ -1493,7 +1520,7 @@ const STAMM_BP=[
   ['GE','Genève',46.2102,6.1424],          ['MG','Martigny',46.1010,7.0722],
   ['SIO','Sion',46.2273,7.3272],           ['BI','Biel/Bienne',47.1327,7.2436],
   ['NE','Neuchâtel',46.9968,6.9364],       ['DMT','Delémont',47.3648,7.3494],
-  ['YV','Yverdon-les-Bains',46.7645,6.6425]
+  ['YV','Yverdon-les-Bains',46.7645,6.6425], ['ISE','Iselle di Trasquera',46.2560,8.1720]
 ];
 
 /* ---------- Beispieldaten ----------
@@ -1515,7 +1542,7 @@ async function beispieldaten(){
     ['',   '111','Genève – Lausanne','60',['GE','LS']],
     ['',   '211','Lausanne – Sion','107',['LS','MG','SIO']],
     ['',   '221','Sion – Brig','48',['SIO','VI','BR']],
-    ['',   '222','Brig – Iselle (Simplon)','23',['BR']],
+    ['',   '222','Brig – Iselle (Simplon)','23',['BR','ISE']],
     ['',   '322','Thun – Spiez – Frutigen','22',['TH','SP','FR']],
     ['',   '351','Frutigen – Brig (Lötschberg-Bergstrecke)','52',['FR','BR']],
     ['',   '361','Spiez – Interlaken Ost','25',['SP','IO']],
@@ -1589,10 +1616,26 @@ document.addEventListener('input',ev=>{
     SUCHLAUF=setTimeout(()=>bpSuchen(wert), 320);
   }
 });
-document.addEventListener('change',ev=>{
-  if(ev.target.id==='f-bpwahl'&&ev.target.value&&ENTWURF){
-    ENTWURF.punkte.push(ev.target.value); ev.target.value=''; zeichneBpWahl();
+document.addEventListener('change',async ev=>{
+  if(ev.target.id!=='f-bpwahl' || !ev.target.value || !ENTWURF) return;
+  let wert=ev.target.value;
+  ev.target.value='';
+  if(wert.startsWith('neu:')){
+    const abk=wert.slice(4);
+    const eintrag=STAMM_BP.find(x=>x[0]===abk);
+    if(!eintrag) return;
+    meldung(eintrag[1]+' wird angelegt …');
+    const {data,error}=await db.from('betriebspunkt').insert({
+      abk:eintrag[0], name:eintrag[1], typ:'Bahnhof', bahn:'SBB', lat:eintrag[2], lon:eintrag[3]
+    }).select().single();
+    if(error){ fehler(error); return; }
+    S.punkte.push(data);
+    wert=data.id;
+    const sel=$('f-bpwahl'); if(sel) sel.innerHTML=bpAuswahlHtml();
+    meldung(eintrag[1]+' angelegt und eingefügt');
   }
+  ENTWURF.punkte.push(wert);
+  zeichneBpWahl();
 });
 document.addEventListener('keydown',ev=>{
   if(ev.key==='Escape'&&!$('hintergrund').hidden) blattZu();
