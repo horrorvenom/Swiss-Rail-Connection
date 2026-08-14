@@ -224,9 +224,15 @@ function startfehler(text){
   document.body.innerHTML = `<div class="tor"><div class="logo">START NICHT MÖGLICH</div>
     <h1>App nicht bereit</h1><div class="unter">${text}</div></div>`;
 }
-window.addEventListener('error', ev=>{
+function fehlerAnzeigen(text){
   const z=document.querySelector('#torstatus')||document.querySelector('#statuszeile');
-  if(z){ z.textContent=(ev.message||'Unbekannter Fehler'); z.className='statuszeile fehler'; }
+  if(z){ z.textContent=text||'Unbekannter Fehler'; z.className='statuszeile fehler'; }
+}
+window.addEventListener('error', ev=>fehlerAnzeigen(ev.message));
+window.addEventListener('unhandledrejection', ev=>{
+  const g=ev.reason;
+  if(g && g.name==='AbortError') return;
+  fehlerAnzeigen(g && g.message ? g.message : String(g));
 });
 try{
   if(!window.supabase || !window.supabase.createClient)
@@ -985,12 +991,11 @@ async function verlaufErmitteln(st){
 }
 
 /* ---------- Vorschläge beim Erfassen einer Anlage ---------- */
-let SUCHLAUF=null;
 
-function trefferZeigen(liste){
+function trefferZeigen(liste, status){
   const box=document.getElementById('p-treffer');
   if(!box) return;
-  if(!liste.length){ box.hidden=true; box.innerHTML=''; return; }
+  if(!liste.length && !status){ box.hidden=true; box.innerHTML=''; return; }
   box.hidden=false;
   box.innerHTML=liste.map(t=>`<button type="button" class="vorschlag" data-tat="bp-uebernehmen"
     data-abk="${esc(t.abk||'')}" data-name="${esc(t.name)}" data-typ="${esc(t.typ||'')}"
@@ -998,7 +1003,8 @@ function trefferZeigen(liste){
     data-lat="${t.lat!=null?t.lat:''}" data-lon="${t.lon!=null?t.lon:''}">
     <span class="vk">${esc(t.abk||'—')}</span>
     <span class="vn">${esc(t.name)}${t.bahn?` <span style="color:var(--stahl);font-size:12px">${esc(t.bahn)}</span>`:''}</span>
-    <span class="vq">${esc(t.quelle)}</span></button>`).join('');
+    <span class="vq">${esc(t.quelle)}</span></button>`).join('')
+    + (status?`<div style="padding:9px 13px;color:var(--stahl);font-size:13px;font-family:var(--mono)">${esc(status)}</div>`:'');
 }
 
 const BAHNEN=['SBB','BLS','SOB','zb Zentralbahn','RhB','MGB','TPF','AB Appenzeller Bahnen',
@@ -1008,81 +1014,111 @@ function bahnKuerzen(op){
   if(!op) return '';
   const t=String(op);
   const karte=[[/bundesbahn|SBB|CFF|FFS/i,'SBB'],[/BLS/i,'BLS'],[/Südostbahn|SOB/i,'SOB'],
-    [/Zentralbahn|zb\b/i,'zb'],[/Rhätische|RhB/i,'RhB'],[/Matterhorn|MGB/i,'MGB'],
-    [/Fribourgeois|TPF/i,'TPF'],[/Appenzeller|\bAB\b/i,'AB'],[/Solothurn-Münster|ASm/i,'ASm'],
+    [/Zentralbahn|\bzb\b/i,'zb'],[/Rhätische|RhB/i,'RhB'],[/Matterhorn|MGB/i,'MGB'],
+    [/Fribourgeois|TPF/i,'TPF'],[/Appenzeller/i,'AB'],[/Solothurn-Münster|ASm/i,'ASm'],
     [/Bern-Solothurn|RBS/i,'RBS'],[/Montreux|MOB/i,'MOB'],[/Martigny|TMR/i,'TMR'],
     [/Sihltal|SZU/i,'SZU'],[/Forch/i,'Forchbahn'],[/TRAVYS/i,'TRAVYS'],[/Aargau Verkehr|WSB|AVA/i,'AVA'],
-    [/Deutsche Bahn|DB /i,'DB'],[/Österreichische|ÖBB/i,'ÖBB'],[/SNCF/i,'SNCF']];
+    [/Deutsche Bahn|^DB/i,'DB'],[/Österreichische|ÖBB/i,'ÖBB'],[/SNCF/i,'SNCF'],[/Trenitalia|\bFS\b/i,'FS']];
   for(const [re,kurz] of karte) if(re.test(t)) return kurz;
-  return t.length<=12 ? t : t.slice(0,12);
+  return t.length<=14 ? t : t.slice(0,14);
 }
 const OSM_TYP={station:'Bahnhof', halt:'Haltestelle', junction:'Abzweigung',
-  service_station:'Dienststation', yard:'Abstellanlage', crossover:'Abzweigung'};
+  service_station:'Dienststation', yard:'Abstellanlage'};
 
-async function osmBetriebspunkte(q){
+/* ---------- Suche: eigenes Verzeichnis, amtliche Haltestellen, OpenStreetMap ---------- */
+let SUCHLAUF=null, SUCH_ABBRUCH=null;
+const SUCH_SPEICHER=new Map();
+
+async function osmBetriebspunkte(q, signal){
+  if(SUCH_SPEICHER.has(q)) return SUCH_SPEICHER.get(q);
   const sicher=q.replace(/[\\^$.*+?()[\]{}|"]/g,'.');
-  const query=`[out:json][timeout:40];area["ISO3166-1"="CH"][admin_level=2]->.ch;`
-    + `(node["railway"~"^(station|halt|junction|service_station|yard)$"]["name"~"${sicher}",i](area.ch);`
-    + `way["railway"~"^(station|halt|junction|service_station|yard)$"]["name"~"${sicher}",i](area.ch););`
-    + `out center tags 30;`;
+  const kasten='45.75,5.80,47.95,10.70';
+  const typen='^(station|halt|junction|service_station|yard)$';
+  const query=`[out:json][timeout:30];`
+    + `(node["railway"~"${typen}"]["name"~"${sicher}",i](${kasten});`
+    + `way["railway"~"${typen}"]["name"~"${sicher}",i](${kasten}););`
+    + `out tags center 40;`;
   const server=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+  let letzter='';
   for(const url of server){
     try{
-      const r=await fetch(url,{ method:'POST', body:'data='+encodeURIComponent(query) });
-      if(!r.ok) continue;
+      const r=await fetch(url,{ method:'POST', body:'data='+encodeURIComponent(query), signal });
+      if(!r.ok){ letzter = r.status===429 ? 'Gleisdatenserver gerade überlastet' : 'Antwort '+r.status; continue; }
       const j=await r.json();
-      return (j.elements||[]).map(e=>{
+      const raus=(j.elements||[]).map(e=>{
         const t=e.tags||{};
         const lat=e.lat!=null?e.lat:(e.center&&e.center.lat);
         const lon=e.lon!=null?e.lon:(e.center&&e.center.lon);
         if(lat==null||lon==null||!t.name) return null;
-        return { abk:(t['railway:ref']||t.ref||'').trim(), name:t.name.trim(),
+        return { abk:String(t['railway:ref']||t.ref||'').trim(), name:String(t.name).trim(),
                  typ:OSM_TYP[t.railway]||'Bahnhof', bahn:bahnKuerzen(t.operator),
                  lat:+lat, lon:+lon, quelle:'OpenStreetMap' };
       }).filter(Boolean);
-    }catch(e){ /* nächster Server */ }
+      SUCH_SPEICHER.set(q, raus);
+      return raus;
+    }catch(e){
+      if(e.name==='AbortError') throw e;
+      letzter='nicht erreichbar';
+    }
   }
-  return [];
+  const leer=[]; leer.hinweis=letzter; return leer;
 }
 
 async function bpSuchen(q){
   q=q.trim();
   if(q.length<2){ trefferZeigen([]); return; }
+  if(SUCH_ABBRUCH) SUCH_ABBRUCH.abort();
+  const ctrl=new AbortController();
+  SUCH_ABBRUCH=ctrl;
+
   const kl=q.toLowerCase();
-  const lokal=STAMM_BP
-    .filter(([a,n])=>n.toLowerCase().includes(kl)||a.toLowerCase().startsWith(kl))
-    .slice(0,6)
-    .map(([abk,name,lat,lon])=>({abk,name,lat,lon,quelle:'Verzeichnis'}));
-  trefferZeigen(lokal);
+  const treffer=[];
+  const dazu=x=>{
+    if(!x || !x.name) return;
+    if(treffer.some(y=>y.name.toLowerCase()===x.name.toLowerCase() && (y.abk||'')===(x.abk||''))) return;
+    treffer.push(x);
+  };
 
-  try{
-    const osm=await osmBetriebspunkte(q);
-    const mitAbk=osm.filter(x=>x.abk).sort((a,b)=>a.name.localeCompare(b.name,'de'));
-    const ohneAbk=osm.filter(x=>!x.abk).sort((a,b)=>a.name.localeCompare(b.name,'de'));
-    const bisher=lokal.concat(mitAbk, ohneAbk)
-      .filter((x,i,arr)=>arr.findIndex(y=>y.name.toLowerCase()===x.name.toLowerCase()
-                                       && (y.abk||'')===(x.abk||''))===i);
-    if(bisher.length>lokal.length) trefferZeigen(bisher.slice(0,20));
-    if(bisher.length>=8) return;
-  }catch(e){ /* weiter mit dem amtlichen Verzeichnis */ }
+  /* 1) eigenes Verzeichnis — sofort */
+  STAMM_BP.filter(([a,n])=>n.toLowerCase().includes(kl)||a.toLowerCase().startsWith(kl))
+    .slice(0,8)
+    .forEach(([abk,name,lat,lon])=>dazu({abk,name,lat,lon,typ:'Bahnhof',bahn:'SBB',quelle:'Verzeichnis'}));
+  trefferZeigen(treffer, 'Suche in den amtlichen Verzeichnissen …');
 
+  /* 2) amtliche öV-Haltestellen — schnell, alle Bahnen, ohne Abkürzung */
   try{
     const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=featuresearch`
-      + `&features=ch.bav.haltestellen-oev&sr=4326&limit=12&searchText=${encodeURIComponent(q)}`);
+      + `&features=ch.bav.haltestellen-oev&sr=4326&limit=15&searchText=${encodeURIComponent(q)}`,
+      { signal: ctrl.signal });
     const j=await r.json();
-    const roh=(j.results||[]).map(x=>x.attrs).filter(Boolean);
-    const fern=[];
-    roh.forEach(a=>{
+    (j.results||[]).map(x=>x.attrs).filter(Boolean).forEach(a=>{
       const k=ausAttrs(a); if(!k) return;
       const name=String(a.label||'').replace(/<[^>]*>/g,'').trim();
-      if(!name) return;
-      if(lokal.some(l=>l.name.toLowerCase()===name.toLowerCase())) return;
-      if(fern.some(f=>f.name===name)) return;
-      fern.push({abk:'', name, lat:k.lat, lon:k.lon, quelle:'öV-Haltestellen'});
+      dazu({ abk:'', name, typ:'Bahnhof', bahn:'', lat:k.lat, lon:k.lon, quelle:'öV-Haltestellen' });
     });
-    trefferZeigen(lokal.concat(fern).slice(0,14));
-  }catch(e){ /* Verzeichnis reicht */ }
+  }catch(e){ if(e.name==='AbortError') return; }
+  if(ctrl.signal.aborted) return;
+  trefferZeigen(treffer, 'Suche Abkürzungen …');
+
+  /* 3) OpenStreetMap — liefert die Abkürzungen, dauert am längsten */
+  let osm=[];
+  try{ osm=await osmBetriebspunkte(q, ctrl.signal); }
+  catch(e){ if(e.name==='AbortError') return; }
+  if(ctrl.signal.aborted) return;
+
+  /* Abkürzung aus OSM in bereits gefundene Einträge übernehmen */
+  osm.forEach(o=>{
+    const vorhanden=treffer.find(t=>!t.abk && t.name.toLowerCase()===o.name.toLowerCase());
+    if(vorhanden && o.abk){ vorhanden.abk=o.abk; vorhanden.bahn=vorhanden.bahn||o.bahn;
+      vorhanden.typ=o.typ||vorhanden.typ; vorhanden.quelle='öV + OSM'; }
+  });
+  osm.sort((a,b)=>(b.abk?1:0)-(a.abk?1:0) || a.name.localeCompare(b.name,'de')).forEach(dazu);
+  treffer.sort((a,b)=>(b.abk?1:0)-(a.abk?1:0));
+
+  if(treffer.length) trefferZeigen(treffer.slice(0,25));
+  else trefferZeigen([], 'Nichts gefunden'+(osm.hinweis?' — '+osm.hinweis:'')+'. Felder von Hand ausfüllen.');
 }
+
 
 function ansichtKonto(){
   const p=S.profil;
@@ -1505,15 +1541,16 @@ const TATEN = {
       ? await db.from('betriebspunkt').update(werte).eq('id',ENTWURF.id)
       : await db.from('betriebspunkt').insert(werte);
     if(error) return fehler(error);
-    blattZu(); await alleLaden(); zeichnen(); meldung('Anlage gesichert');
-    if(STRECKE_ZURUECK){
+    const entwurf=STRECKE_ZURUECK;          // vor blattZu sichern, das räumt auf
+    blattZu(); await alleLaden(); zeichnen();
+    if(entwurf){
       const neuerPunkt=S.punkte.find(x=>x.abk===abk);
-      const entwurf=STRECKE_ZURUECK; STRECKE_ZURUECK=null;
       if(neuerPunkt) entwurf.punkte.push(neuerPunkt.id);
       formularStrecke(entwurf.id, entwurf);
       meldung(neuerPunkt?neuerPunkt.name+' eingefügt':'Anlage gesichert');
       return;
     }
+    meldung('Anlage gesichert');
     if(werte.lat==null || werte.lon==null){
       const treffer=S.punkte.find(x=>x.abk===abk);
       if(treffer && !hatKoord(treffer)){
@@ -1752,7 +1789,7 @@ document.addEventListener('input',ev=>{
   if(ev.target.id==='p-suche'){
     clearTimeout(SUCHLAUF);
     const wert=ev.target.value;
-    SUCHLAUF=setTimeout(()=>bpSuchen(wert), 320);
+    SUCHLAUF=setTimeout(()=>bpSuchen(wert), 650);
   }
 });
 document.addEventListener('change',async ev=>{
