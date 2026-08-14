@@ -575,6 +575,10 @@ function streckenGeometrie(st){
 
 function ansichtKarte(){
   const ohne = S.punkte.filter(p=>!hatKoord(p)).length;
+  const zeichenbar = S.strecken.filter(st=>streckenGeometrie(st).length>=2);
+  const stumm = S.strecken.filter(st=>streckenGeometrie(st).length<2);
+  const ohneNr = zeichenbar.filter(st=>!st.linie && !st.tabelle);
+  const gerade = zeichenbar.filter(st=>!(Array.isArray(st.verlauf)&&st.verlauf.length>1));
   const wahl = KARTENMODUS==='punkt'
     ? `<label style="margin-bottom:9px"><span>Betriebspunkt wählen, dann auf die Karte tippen</span>
         <select id="kz-punkt">${S.punkte.slice().sort((a,b)=>(hatKoord(a)?1:0)-(hatKoord(b)?1:0)||a.name.localeCompare(b.name,'de'))
@@ -584,7 +588,8 @@ function ansichtKarte(){
         <select id="kz-strecke">${S.strecken.slice().sort((a,b)=>a.name.localeCompare(b.name,'de'))
           .map(st=>`<option value="${st.id}"${KARTENZIEL===st.id?' selected':''}>${esc(st.name)}</option>`).join('')}</select></label>
        <div class="aktionen" style="margin:0 0 9px">
-         <button class="btn haupt" data-tat="verlauf-sichern">Verlauf sichern (${VERLAUF.length})</button>
+         <button class="btn haupt" data-tat="verlauf-auto">Gleisen folgen lassen</button>
+         <button class="btn" data-tat="verlauf-sichern">Handverlauf sichern (${VERLAUF.length})</button>
          <button class="btn" data-tat="verlauf-zurueck">Letzter Punkt weg</button>
          <button class="btn gefahr" data-tat="verlauf-leeren">Alles löschen</button>
        </div>`
@@ -593,7 +598,7 @@ function ansichtKarte(){
   const hinweis = KARTENMODUS==='punkt'
     ? '<div class="hinweisbalken">Tippe an die Stelle, an der der gewählte Betriebspunkt liegt. Die Koordinate wird sofort gespeichert. Bereits gesetzte Punkte lassen sich mit dem Finger verschieben.</div>'
     : KARTENMODUS==='verlauf'
-    ? '<div class="hinweisbalken">Tippe den Streckenverlauf entlang der Gleise nach. Ohne eigenen Verlauf wird die Strecke gerade zwischen ihren Betriebspunkten gezogen.</div>'
+    ? '<div class="hinweisbalken">«Gleisen folgen lassen» berechnet den Verlauf aus dem Schienennetz von OpenStreetMap — das dauert je Abschnitt einige Sekunden. Von Hand tippen geht auch, etwa wenn kein Gleis erfasst ist.</div>'
     : '';
 
   return `
@@ -603,6 +608,17 @@ function ansichtKarte(){
     <button class="chip ${KARTENMODUS==='verlauf'?'an':''}" data-tat="kartenmodus" data-wert="verlauf">Verlauf zeichnen</button>
   </div>
   ${hinweis}${wahl}
+  ${!S.strecken.length
+    ? `<div class="hinweisbalken" style="border-left-color:var(--halt)"><b>Keine Strecken vorhanden.</b>
+        Es kann nichts gezeichnet werden. Unter Konto die Beispieldaten laden oder im Reiter Strecken eine anlegen.</div>`
+    : stumm.length
+    ? `<div class="hinweisbalken" style="border-left-color:var(--warnung)">
+        <b>${zeichenbar.length} von ${S.strecken.length} Strecken werden gezeichnet.</b>
+        Ohne Linie und damit ohne Nummernschild: ${stumm.slice(0,4).map(st=>esc(st.name)).join(', ')}${stumm.length>4?' und '+(stumm.length-4)+' weitere':''}.
+        Diesen Strecken fehlen Betriebspunkte mit Koordinaten.</div>`
+    : ohneNr.length
+    ? `<div class="hinweisbalken">${ohneNr.length} gezeichnete Strecke(n) haben weder BAV-Nummer noch Streckentabelle und erscheinen deshalb ohne Schild.</div>`
+    : ''}
   <div id="karte-box" class="kartenbox"></div>
   <div class="legende">
     <span><span class="lampe gueltig klein"></span>Kenntnis gültig</span>
@@ -616,8 +632,12 @@ function ansichtKarte(){
     <span class="mono"><span class="ss-tab">■</span> Streckentabelle R 30131</span>
     <span>Schwarze Zahlen im Kartenbild stammen vom Bundesamt für Verkehr</span>
   </div>
+  ${gerade.length?`<div class="aktionen" style="margin-top:12px">
+      <button class="btn haupt voll" data-tat="verlauf-alle">${gerade.length} Strecke(n) auf die Gleise legen</button>
+    </div>
+    <div class="fussnote" style="margin-top:8px">Strecken ohne eigenen Verlauf sind gestrichelt und laufen schnurgerade zwischen den Bahnhöfen. Der Knopf berechnet den echten Gleisverlauf aus OpenStreetMap; für alle Strecken zusammen dauert das einige Minuten.</div>`:''}
   ${ohne?`<div class="aktionen" style="margin-top:12px">
-      <button class="btn haupt voll" data-tat="koordinaten-suchen">${ohne} fehlende Koordinaten automatisch suchen</button>
+      <button class="btn voll" data-tat="koordinaten-suchen">${ohne} fehlende Koordinaten automatisch suchen</button>
     </div>
     <div class="fussnote" style="margin-top:8px">Gesucht wird bei den öV-Haltestellen und der Landestopografie, sonst bei OpenStreetMap. Was dort nicht zu finden ist — Anschlussgleise, Abstellanlagen —, setzt du im Modus «Punkt setzen» von Hand.</div>`:''}`;
 }
@@ -775,6 +795,131 @@ async function koordinatenNachziehen(punktIds){
     await new Promise(r=>setTimeout(r,350));
   }
   return gesetzt>0;
+}
+
+/* ============================================================
+   Gleisverlauf aus OpenStreetMap — kürzester Weg auf dem Schienennetz
+   ============================================================ */
+function meterAbstand(a,b){
+  const R=6371000, t=Math.PI/180;
+  const dφ=(b[0]-a[0])*t, dλ=(b[1]-a[1])*t, φ=(a[0]+b[0])/2*t;
+  const x=dλ*Math.cos(φ);
+  return Math.sqrt(dφ*dφ + x*x)*R;
+}
+
+async function gleiseHolen(a,b){
+  const puffer=Math.max(0.02, Math.abs(a[0]-b[0])*0.35, Math.abs(a[1]-b[1])*0.35);
+  const s=Math.min(a[0],b[0])-puffer, n=Math.max(a[0],b[0])+puffer;
+  const w=Math.min(a[1],b[1])-puffer, e=Math.max(a[1],b[1])+puffer;
+  const q=`[out:json][timeout:90];way["railway"~"^(rail|light_rail|narrow_gauge)$"]`
+        + `["service"!~"."]["railway"!="abandoned"](${s},${w},${n},${e});out geom;`;
+  const r=await fetch('https://overpass-api.de/api/interpreter',
+    { method:'POST', body:'data='+encodeURIComponent(q) });
+  if(!r.ok) throw new Error('Gleisdaten nicht erreichbar ('+r.status+')');
+  const j=await r.json();
+  return j.elements||[];
+}
+
+function graphBauen(ways){
+  const G=new Map();
+  const key=p=>p.lat.toFixed(6)+','+p.lon.toFixed(6);
+  const kante=(k1,p1,k2,p2)=>{
+    if(!G.has(k1)) G.set(k1,{lat:p1.lat,lon:p1.lon,n:[]});
+    G.get(k1).n.push([k2, meterAbstand([p1.lat,p1.lon],[p2.lat,p2.lon])]);
+  };
+  ways.forEach(w=>{
+    const g=w.geometry||[];
+    for(let i=1;i<g.length;i++){
+      const a=g[i-1], b=g[i], ka=key(a), kb=key(b);
+      if(ka===kb) continue;
+      kante(ka,a,kb,b); kante(kb,b,ka,a);
+    }
+  });
+  return G;
+}
+
+function naechsterKnoten(G,pt){
+  let best=null, bd=Infinity;
+  G.forEach((v,k)=>{ const d=meterAbstand(pt,[v.lat,v.lon]); if(d<bd){ bd=d; best=k; } });
+  return {k:best, d:bd};
+}
+
+function kuerzesterWeg(G,start,ziel){
+  const heap=[], dist=new Map([[start,0]]), vor=new Map(), fertig=new Set();
+  const rein=x=>{ heap.push(x); let i=heap.length-1;
+    while(i>0){ const p=(i-1)>>1; if(heap[p][0]<=heap[i][0]) break;
+      [heap[p],heap[i]]=[heap[i],heap[p]]; i=p; } };
+  const raus=()=>{ const top=heap[0], last=heap.pop();
+    if(heap.length){ heap[0]=last; let i=0;
+      for(;;){ const l=2*i+1, r=l+1; let m=i;
+        if(l<heap.length&&heap[l][0]<heap[m][0]) m=l;
+        if(r<heap.length&&heap[r][0]<heap[m][0]) m=r;
+        if(m===i) break; [heap[m],heap[i]]=[heap[i],heap[m]]; i=m; } }
+    return top; };
+  rein([0,start]);
+  while(heap.length){
+    const [d,k]=raus();
+    if(fertig.has(k)) continue;
+    fertig.add(k);
+    if(k===ziel) break;
+    const v=G.get(k); if(!v) continue;
+    for(const [nk,nd] of v.n){
+      const alt=d+nd;
+      if(alt < (dist.has(nk)?dist.get(nk):Infinity)){ dist.set(nk,alt); vor.set(nk,k); rein([alt,nk]); }
+    }
+  }
+  if(start!==ziel && !vor.has(ziel)) return null;
+  const pfad=[]; let k=ziel, schutz=0;
+  while(k && schutz++<200000){ const v=G.get(k); pfad.unshift([v.lat,v.lon]); k=vor.get(k); }
+  return pfad;
+}
+
+/* Douglas-Peucker — hält die Punktzahl klein, ohne den Verlauf zu verfälschen */
+function ausduennen(pfad, tol){
+  if(pfad.length<3) return pfad;
+  const rekursiv=(pts)=>{
+    let max=0, idx=0;
+    const [a,b]=[pts[0], pts[pts.length-1]];
+    for(let i=1;i<pts.length-1;i++){
+      const d=abstandZurLinie(pts[i],a,b);
+      if(d>max){ max=d; idx=i; }
+    }
+    if(max>tol){
+      const l=rekursiv(pts.slice(0,idx+1)), r=rekursiv(pts.slice(idx));
+      return l.slice(0,-1).concat(r);
+    }
+    return [a,b];
+  };
+  return rekursiv(pfad);
+}
+function abstandZurLinie(p,a,b){
+  const l2=Math.pow(meterAbstand(a,b),2);
+  if(l2===0) return meterAbstand(p,a);
+  const t=Math.max(0, Math.min(1,
+    (((p[0]-a[0])*(b[0]-a[0]) + (p[1]-a[1])*(b[1]-a[1])) /
+     (Math.pow(b[0]-a[0],2)+Math.pow(b[1]-a[1],2))) || 0));
+  return meterAbstand(p,[a[0]+t*(b[0]-a[0]), a[1]+t*(b[1]-a[1])]);
+}
+
+async function verlaufErmitteln(st){
+  const pkte=(st.punkte||[]).map(punkt).filter(hatKoord).map(p=>[p.lat,p.lon]);
+  if(pkte.length<2) throw new Error('Mindestens zwei Betriebspunkte mit Koordinate nötig');
+  let gesamt=[];
+  for(let i=1;i<pkte.length;i++){
+    if(meterAbstand(pkte[i-1],pkte[i])>80000)
+      throw new Error('Abschnitt zu lang — Zwischenbetriebspunkte erfassen');
+    meldung(`${st.name}: Gleise Abschnitt ${i} von ${pkte.length-1} …`);
+    const ways=await gleiseHolen(pkte[i-1],pkte[i]);
+    if(!ways.length) throw new Error('Keine Gleisdaten in diesem Bereich');
+    const G=graphBauen(ways);
+    const a=naechsterKnoten(G,pkte[i-1]), b=naechsterKnoten(G,pkte[i]);
+    if(a.d>900 || b.d>900) throw new Error('Betriebspunkt liegt zu weit vom Gleis — Koordinate prüfen');
+    const teil=kuerzesterWeg(G,a.k,b.k);
+    if(!teil) throw new Error('Keine durchgehende Gleisverbindung gefunden');
+    gesamt = gesamt.length ? gesamt.concat(teil.slice(1)) : teil;
+    if(i<pkte.length-1) await new Promise(r=>setTimeout(r,1100));
+  }
+  return ausduennen(gesamt, 12).map(k=>[+k[0].toFixed(5), +k[1].toFixed(5)]);
 }
 
 function ansichtKonto(){
@@ -1020,6 +1165,35 @@ const TATEN = {
     meldung(`${ok} Koordinaten gesetzt${fehl?', '+fehl+' nicht gefunden':''}`, fehl>0);
   },
   'verlauf-zurueck': ()=>{ VERLAUF.pop(); zeichnen(); },
+  'verlauf-auto': async ()=>{
+    const sel=document.getElementById('kz-strecke');
+    const st=S.strecken.find(x=>x.id===(sel?sel.value:KARTENZIEL));
+    if(!st){ meldung('Keine Strecke gewählt', true); return; }
+    if(!darfStamm(st)){ meldung('Nur die erfassende Person oder ein Administrator darf den Verlauf ändern', true); return; }
+    try{
+      const pfad=await verlaufErmitteln(st);
+      const {error}=await db.from('strecke').update({verlauf:pfad}).eq('id',st.id);
+      if(error) return fehler(error);
+      VERLAUF=[]; await alleLaden(); zeichnen();
+      meldung(`${st.name}: Gleisverlauf mit ${pfad.length} Punkten übernommen`);
+    }catch(e){ fehler(e); }
+  },
+  'verlauf-alle': async ()=>{
+    const offen=S.strecken.filter(st=>darfStamm(st) && !(Array.isArray(st.verlauf)&&st.verlauf.length>1)
+      && (st.punkte||[]).map(punkt).filter(hatKoord).length>=2);
+    if(!offen.length){ meldung('Alle Strecken haben bereits einen Gleisverlauf'); return; }
+    let ok=0, fehl=0;
+    for(const st of offen){
+      try{
+        const pfad=await verlaufErmitteln(st);
+        const {error}=await db.from('strecke').update({verlauf:pfad}).eq('id',st.id);
+        error ? fehl++ : ok++;
+      }catch(e){ fehl++; }
+      await new Promise(r=>setTimeout(r,1200));
+    }
+    await alleLaden(); zeichnen();
+    meldung(`${ok} Strecken auf die Gleise gelegt${fehl?', '+fehl+' nicht ermittelbar':''}`, fehl>0);
+  },
   'verlauf-leeren': ()=>{ VERLAUF=[]; zeichnen(); },
   'verlauf-sichern': async ()=>{
     const sel=document.getElementById('kz-strecke');
