@@ -1004,7 +1004,7 @@ function trefferZeigen(liste, status){
     data-abk="${esc(t.abk||'')}" data-name="${esc(t.name)}" data-typ="${esc(t.typ||'')}"
     data-bahn="${esc(t.bahn||'')}"
     data-lat="${t.lat!=null?t.lat:''}" data-lon="${t.lon!=null?t.lon:''}">
-    <span class="vk">${esc(t.abk||'—')}</span>
+    <span class="vk"${t.abk?'':' style="color:var(--stahl)"'}>${esc(t.abk||'ohne')}</span>
     <span class="vn">${esc(t.name)}${t.bahn?` <span style="color:var(--stahl);font-size:12px">${esc(t.bahn)}</span>`:''}</span>
     <span class="vq">${esc(t.quelle)}</span></button>`).join('')
     + (status?`<div style="padding:9px 13px;color:var(--stahl);font-size:13px;font-family:var(--mono)">${esc(status)}</div>`:'');
@@ -1079,11 +1079,11 @@ async function overpassKachel(box, signal){
 function verzeichnisZusammenfuehren(roh){
   const karte=new Map();
   roh.forEach(x=>{
-    const k=(x.abk?'A:'+x.abk.toLowerCase():'N:'+x.name.toLowerCase())
-          +'|'+Math.round(x.lat*120)+'|'+Math.round(x.lon*120);
+    /* gleicher Name und nahe beieinander gilt als derselbe Betriebspunkt */
+    const k=normName(x.name)+'|'+Math.round(x.lat*150)+'|'+Math.round(x.lon*150);
     const alt=karte.get(k);
     if(!alt){ karte.set(k,x); return; }
-    if(!alt.abk && x.abk) karte.set(k,x);
+    if(!alt.abk && x.abk){ x.bahn=x.bahn||alt.bahn; karte.set(k,x); }
     else if(!alt.bahn && x.bahn) alt.bahn=x.bahn;
   });
   return [...karte.values()].sort((a,b)=>a.name.localeCompare(b.name,'de'));
@@ -1107,11 +1107,12 @@ function verzeichnisLaden(ausOsm){
       }catch(e){ /* dann eben aus OpenStreetMap */ }
     }
     const roh=[];
-    for(let i=0;i<KACHELN.length;i++){
-      meldung(`Betriebspunkte laden — Gebiet ${i+1} von ${KACHELN.length} …`);
-      const teil=await overpassKachel(KACHELN[i]);
-      if(teil) roh.push(...teil);
-      if(i<KACHELN.length-1) await new Promise(r=>setTimeout(r,900));
+    for(let i=0;i<KACHELN.length;i+=3){
+      const gruppe=KACHELN.slice(i,i+3);
+      meldung(`Betriebspunkte laden — Gebiet ${Math.min(i+3,KACHELN.length)} von ${KACHELN.length} …`);
+      const teile=await Promise.all(gruppe.map(k=>overpassKachel(k).catch(()=>null)));
+      teile.forEach(t=>{ if(t) roh.push(...t); });
+      if(i+3<KACHELN.length) await new Promise(r=>setTimeout(r,700));
     }
     VERZ_LAEUFT=null;
     if(!roh.length) return null;
@@ -1160,6 +1161,78 @@ function ausVerzeichnis(q){
   return treffer;
 }
 
+/* ---------- Abkürzungen über die Lage nachschlagen ----------
+   Zuverlässiger als über den Namen: das amtliche Haltestellenverzeichnis
+   und OpenStreetMap schreiben Bahnhöfe oft leicht verschieden.          */
+const UMKREIS_SPEICHER=new Map();
+
+function normName(n){
+  return String(n||'').toLowerCase()
+    .replace(/[äàáâ]/g,'a').replace(/[öòóô]/g,'o').replace(/[üùúû]/g,'u')
+    .replace(/[éèêë]/g,'e').replace(/ç/g,'c').replace(/ß/g,'ss')
+    .replace(/[^a-z0-9]+/g,' ').trim();
+}
+
+/* Ein Bahnhof soll einmal erscheinen — der Eintrag mit Abkürzung gewinnt. */
+function entdoppeln(liste){
+  const karte=new Map();
+  liste.forEach(x=>{
+    const k=normName(x.name);
+    const alt=karte.get(k);
+    if(!alt){ karte.set(k,x); return; }
+    if(!alt.abk && x.abk){ x.bahn=x.bahn||alt.bahn; karte.set(k,x); }
+    else if(!alt.bahn && x.bahn) alt.bahn=x.bahn;
+  });
+  return [...karte.values()];
+}
+
+async function abkuerzungenNachtragen(liste, signal){
+  const offen=liste.filter(t=>!t.abk && t.lat!=null && t.lon!=null).slice(0,12);
+  if(!offen.length) return false;
+
+  const frisch=offen.filter(t=>!UMKREIS_SPEICHER.has(t.lat+','+t.lon));
+  if(frisch.length){
+    const teile=[];
+    frisch.forEach(t=>{
+      teile.push(`node["railway:ref"](around:450,${t.lat},${t.lon});`);
+      teile.push(`way["railway:ref"](around:450,${t.lat},${t.lon});`);
+    });
+    const query=`[out:json][timeout:40];(${teile.join('')});out tags center;`;
+    let kandidaten=null;
+    for(const url of OVERPASS){
+      try{
+        const r=await fetch(url,{ method:'POST', body:'data='+encodeURIComponent(query), signal });
+        if(!r.ok) continue;
+        const j=await r.json();
+        kandidaten=(j.elements||[]).map(bpAusElement).filter(x=>x&&x.abk);
+        break;
+      }catch(err){ if(err.name==='AbortError') throw err; }
+    }
+    if(!kandidaten) return false;
+    frisch.forEach(t=>{
+      let best=null, bd=500;
+      kandidaten.forEach(k=>{
+        const d=meterAbstand([t.lat,t.lon],[k.lat,k.lon]);
+        if(d<bd){ bd=d; best=k; }
+      });
+      UMKREIS_SPEICHER.set(t.lat+','+t.lon, best);
+    });
+  }
+
+  let geaendert=false;
+  offen.forEach(t=>{
+    const best=UMKREIS_SPEICHER.get(t.lat+','+t.lon);
+    if(best && best.abk){
+      t.abk=best.abk;
+      t.bahn=t.bahn||best.bahn;
+      t.typ=best.typ||t.typ;
+      t.quelle='Betriebspunkt';
+      geaendert=true;
+    }
+  });
+  return geaendert;
+}
+
 async function bpSuchen(q){
   q=q.trim();
   if(q.length<2){ trefferZeigen([]); return; }
@@ -1167,34 +1240,44 @@ async function bpSuchen(q){
   const ctrl=new AbortController();
   SUCH_ABBRUCH=ctrl;
 
-  let treffer=ausVerzeichnis(q);
-  if(!VERZEICHNIS){
-    trefferZeigen(treffer, 'Betriebspunktverzeichnis wird geladen — beim ersten Mal bis zu einer Minute …');
-    await verzeichnisLaden();
-    if(ctrl.signal.aborted) return;
-    treffer=ausVerzeichnis(q);
-  }
-  trefferZeigen(treffer);
+  let treffer=entdoppeln(ausVerzeichnis(q));
+  trefferZeigen(treffer, treffer.length?'':'Suche …');
 
-  if(treffer.length<5){
-    try{
-      const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=featuresearch`
-        + `&features=ch.bav.haltestellen-oev&sr=4326&limit=12&searchText=${encodeURIComponent(q)}`,
-        { signal: ctrl.signal });
-      const j=await r.json();
-      (j.results||[]).map(x=>x.attrs).filter(Boolean).forEach(a=>{
-        const k=ausAttrs(a); if(!k) return;
-        const name=String(a.label||'').replace(/<[^>]*>/g,'').trim();
-        if(!name) return;
-        if(treffer.some(t=>t.name.toLowerCase()===name.toLowerCase())) return;
-        treffer.push({ abk:'', name, typ:'Bahnhof', bahn:'', lat:k.lat, lon:k.lon, quelle:'öV-Haltestellen' });
-      });
-    }catch(e){ if(e.name==='AbortError') return; }
-    if(ctrl.signal.aborted) return;
-  }
+  /* Amtliches Haltestellenverzeichnis — kennt jeden Bahnhof, ohne Abkürzung */
+  try{
+    const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=featuresearch`
+      + `&features=ch.bav.haltestellen-oev&sr=4326&limit=15&searchText=${encodeURIComponent(q)}`,
+      { signal: ctrl.signal });
+    const j=await r.json();
+    (j.results||[]).map(x=>x.attrs).filter(Boolean).forEach(a=>{
+      const k=ausAttrs(a); if(!k) return;
+      const name=String(a.label||'').replace(/<[^>]*>/g,'').trim();
+      if(!name) return;
+      treffer.push({ abk:'', name, typ:'Bahnhof', bahn:'', lat:k.lat, lon:k.lon, quelle:'öV-Haltestellen' });
+    });
+    treffer=entdoppeln(treffer);
+  }catch(e){ if(e.name==='AbortError') return; }
+  if(ctrl.signal.aborted) return;
 
-  if(treffer.length) trefferZeigen(treffer.slice(0,30));
-  else trefferZeigen([], 'Nichts gefunden'+(VERZ_FEHLER?' — Verzeichnis '+VERZ_FEHLER:'')+'. Felder von Hand ausfüllen.');
+  if(!treffer.length){
+    trefferZeigen([], 'Nichts gefunden — Felder von Hand ausfüllen');
+    return;
+  }
+  const sortieren=()=>treffer.sort((a,b)=>
+    (b.abk?1:0)-(a.abk?1:0)
+    || (normName(a.name).startsWith(normName(q))?0:1)-(normName(b.name).startsWith(normName(q))?0:1)
+    || a.name.localeCompare(b.name,'de'));
+  sortieren();
+  trefferZeigen(treffer.slice(0,25), 'Abkürzungen werden ergänzt …');
+
+  try{
+    const geaendert=await abkuerzungenNachtragen(treffer, ctrl.signal);
+    if(ctrl.signal.aborted) return;
+    if(geaendert) treffer=entdoppeln(treffer);
+  }catch(e){ if(e.name==='AbortError') return; }
+
+  sortieren();
+  trefferZeigen(treffer.slice(0,25));
 }
 
 
@@ -1366,14 +1449,14 @@ function zeichneBpWahl(){
 }
 
 function formularPunkt(id){
-  verzeichnisLaden();          // im Hintergrund, blockiert nicht
   const p=id?punkt(id):null;
   ENTWURF=p?{...p}:{id:null,abk:'',name:'',typ:'Bahnhof',bahn:'',notiz:''};
   const typen=['Bahnhof','Rangierbahnhof','Haltestelle','Abzweigung','Anschlussgleis','Abstellanlage','Betriebsausweichstelle','Dienststation','Depot / Werkstätte','Grenzpunkt','Tunnelportal'];
   blattOeffnen(p?'Anlage bearbeiten':'Anlage erfassen',()=>`
     <div class="hinweis">Anlagen sind gemeinsame Stammdaten und dienen zugleich als Betriebspunkte der Strecken.</div>
-    ${p?'':`<label><span>Bahnhof suchen</span><input id="p-suche" placeholder="Name eingeben, z. B. Arth-Goldau" autocomplete="off"></label>
-    <div class="vorschlaege" id="p-treffer" hidden></div>`}
+    ${p?'':`<label><span>Bahnhof suchen</span><input id="p-suche" placeholder="Name eingeben, z. B. Ausserberg" autocomplete="off"></label>
+    <div class="vorschlaege" id="p-treffer" hidden></div>
+    ${VERZEICHNIS?'':'<div class="hinweis">Abkürzungen werden je Treffer nachgeschlagen. Wer das Verzeichnis unter Konto einmal vollständig lädt, hat sie sofort.</div>'}`}
     <datalist id="abkliste">${STAMM_BP.map(([a,n])=>`<option value="${esc(a)}">${esc(n)}</option>`).join('')}</datalist>
     <div class="zweispaltig">
       <label><span>Abkürzung</span><input id="p-abk" list="abkliste" value="${esc(ENTWURF.abk)}" maxlength="8" placeholder="OL" style="font-family:var(--mono);text-transform:uppercase"></label>
@@ -1607,7 +1690,7 @@ const TATEN = {
     blattZu(); await alleLaden(); zeichnen();
   },
   'bp-uebernehmen': e=>{
-    const f=(id,v)=>{ const el=$(id); if(el && v!=null && v!=='') el.value=v; };
+    const f=(id,v)=>{ const el=$(id); if(el) el.value=(v==null?'':v); };   // auch leeren
     f('p-abk', e.dataset.abk); f('p-name', e.dataset.name);
     f('p-lat', e.dataset.lat); f('p-lon', e.dataset.lon); f('p-bahn', e.dataset.bahn);
     const typ=$('p-typ');
