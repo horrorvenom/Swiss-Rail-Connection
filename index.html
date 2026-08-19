@@ -1160,97 +1160,42 @@ async function verzeichnisSichern(){
 }
 
 function ausVerzeichnis(q){
-  const kl=q.toLowerCase();
+  const kl=normName(q);
+  if(!kl) return [];
   const treffer=[];
   const dazu=x=>{
     if(!x||!x.name) return;
-    if(treffer.some(y=>y.name.toLowerCase()===x.name.toLowerCase() && (y.abk||'')===(x.abk||''))) return;
+    if(treffer.some(y=>normName(y.name)===normName(x.name) && (y.abk||'')===(x.abk||''))) return;
     treffer.push(x);
   };
-  STAMM_BP.filter(([a,n])=>n.toLowerCase().includes(kl)||a.toLowerCase().startsWith(kl))
-    .forEach(([abk,name,lat,lon])=>dazu({abk,name,lat,lon,typ:'Bahnhof',bahn:'SBB',quelle:'Stammliste'}));
-  if(VERZEICHNIS){
-    VERZEICHNIS
-      .filter(x=>x.name.toLowerCase().includes(kl) || (x.abk && x.abk.toLowerCase().startsWith(kl)))
-      .sort((a,b)=>{
-        const ax=a.name.toLowerCase().startsWith(kl)?0:1, bx=b.name.toLowerCase().startsWith(kl)?0:1;
-        return (b.abk?0:1)-(a.abk?0:1) || ax-bx || a.name.localeCompare(b.name,'de');
-      })
+
+  /* 1) amtliche Liste — sofort, mit Abkürzung */
+  const kurz=q.trim().toUpperCase();
+  BP_LISTE.forEach(e=>{
+    const nn=normName(e.name);
+    const passt = nn.includes(kl) || e.abk===kurz || e.abk.startsWith(kurz);
+    if(!passt) return;
+    const k=BP_KOORD[e.abk];
+    dazu({ abk:e.abk, name:e.name, typ:'Bahnhof', bahn:e.bahn,
+           lat:k?k[0]:null, lon:k?k[1]:null, quelle:e.bahn });
+  });
+
+  /* 2) zusätzlich geladenes Verzeichnis (andere Bahnen) */
+  const quelle = VERZEICHNIS || ABK_LISTE;
+  if(quelle){
+    quelle.filter(x=>normName(x.name).includes(kl) || (x.abk && x.abk.toUpperCase().startsWith(kurz)))
       .slice(0,40).forEach(dazu);
   }
+
+  treffer.sort((a,b)=>{
+    const an=normName(a.name), bn=normName(b.name);
+    return (a.abk===kurz?0:1)-(b.abk===kurz?0:1)
+        || (an===kl?0:1)-(bn===kl?0:1)
+        || (an.startsWith(kl)?0:1)-(bn.startsWith(kl)?0:1)
+        || an.length-bn.length
+        || a.name.localeCompare(b.name,'de');
+  });
   return treffer;
-}
-
-/* ---------- Abkürzungen über die Lage nachschlagen ----------
-   Zuverlässiger als über den Namen: das amtliche Haltestellenverzeichnis
-   und OpenStreetMap schreiben Bahnhöfe oft leicht verschieden.          */
-const UMKREIS_SPEICHER=new Map();
-
-function normName(n){
-  return String(n||'').toLowerCase()
-    .replace(/[äàáâ]/g,'a').replace(/[öòóô]/g,'o').replace(/[üùúû]/g,'u')
-    .replace(/[éèêë]/g,'e').replace(/ç/g,'c').replace(/ß/g,'ss')
-    .replace(/[^a-z0-9]+/g,' ').trim();
-}
-
-/* Ein Bahnhof soll einmal erscheinen — der Eintrag mit Abkürzung gewinnt. */
-function entdoppeln(liste){
-  const karte=new Map();
-  liste.forEach(x=>{
-    const k=normName(x.name);
-    const alt=karte.get(k);
-    if(!alt){ karte.set(k,x); return; }
-    if(!alt.abk && x.abk){ x.bahn=x.bahn||alt.bahn; karte.set(k,x); }
-    else if(!alt.bahn && x.bahn) alt.bahn=x.bahn;
-  });
-  return [...karte.values()];
-}
-
-async function abkuerzungenNachtragen(liste, signal){
-  const offen=liste.filter(t=>!t.abk && t.lat!=null && t.lon!=null).slice(0,12);
-  if(!offen.length) return false;
-
-  const frisch=offen.filter(t=>!UMKREIS_SPEICHER.has(t.lat+','+t.lon));
-  if(frisch.length){
-    const teile=[];
-    frisch.forEach(t=>{
-      teile.push(`node["railway:ref"](around:450,${t.lat},${t.lon});`);
-      teile.push(`way["railway:ref"](around:450,${t.lat},${t.lon});`);
-    });
-    const query=`[out:json][timeout:40];(${teile.join('')});out tags center;`;
-    let kandidaten=null;
-    for(const url of OVERPASS){
-      try{
-        const r=await fetch(url,{ method:'POST', body:'data='+encodeURIComponent(query), signal });
-        if(!r.ok) continue;
-        const j=await r.json();
-        kandidaten=(j.elements||[]).map(bpAusElement).filter(x=>x&&x.abk);
-        break;
-      }catch(err){ if(err.name==='AbortError') throw err; }
-    }
-    if(!kandidaten) return false;
-    frisch.forEach(t=>{
-      let best=null, bd=500;
-      kandidaten.forEach(k=>{
-        const d=meterAbstand([t.lat,t.lon],[k.lat,k.lon]);
-        if(d<bd){ bd=d; best=k; }
-      });
-      UMKREIS_SPEICHER.set(t.lat+','+t.lon, best);
-    });
-  }
-
-  let geaendert=false;
-  offen.forEach(t=>{
-    const best=UMKREIS_SPEICHER.get(t.lat+','+t.lon);
-    if(best && best.abk){
-      t.abk=best.abk;
-      t.bahn=t.bahn||best.bahn;
-      t.typ=best.typ||t.typ;
-      t.quelle='Betriebspunkt';
-      geaendert=true;
-    }
-  });
-  return geaendert;
 }
 
 /* ---------- Selbstpflege ----------
@@ -1293,52 +1238,40 @@ async function verzeichnisPflegen(){
 
 async function bpSuchen(q){
   q=q.trim();
-  if(q.length<2){ trefferZeigen([]); return; }
+  if(q.length<1){ trefferZeigen([]); return; }
   if(SUCH_ABBRUCH) SUCH_ABBRUCH.abort();
   const ctrl=new AbortController();
   SUCH_ABBRUCH=ctrl;
 
-  let treffer=entdoppeln(ausVerzeichnis(q));
-  trefferZeigen(treffer, treffer.length?'':'Suche …');
+  /* Amtliche Liste — ohne jede Netzabfrage */
+  let treffer=ausVerzeichnis(q);
+  trefferZeigen(treffer.slice(0,30));
+  if(q.length<3) return;
 
-  /* Amtliches Haltestellenverzeichnis — nur nötig, solange das
-     Betriebspunktverzeichnis fehlt oder wenig gefunden wurde */
-  if(VERZEICHNIS && treffer.length>=5){ trefferZeigen(treffer.slice(0,25)); return; }
+  /* Haltestellenverzeichnis: Koordinaten ergänzen und Betriebspunkte
+     anderer Bahnen einstreuen */
   try{
     const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=featuresearch`
       + `&features=ch.bav.haltestellen-oev&sr=4326&limit=15&searchText=${encodeURIComponent(q)}`,
       { signal: ctrl.signal });
     const j=await r.json();
-    (j.results||[]).map(x=>x.attrs).filter(Boolean).forEach(a=>{
+    const roh=(j.results||[]).map(x=>x.attrs).filter(Boolean);
+    roh.forEach(a=>{
       const k=ausAttrs(a); if(!k) return;
       const name=String(a.label||'').replace(/<[^>]*>/g,'').trim();
       if(!name) return;
+      const nn=normName(name);
+      /* Lage in einen vorhandenen Treffer übernehmen */
+      const gleich=treffer.find(t=>normName(t.name)===nn
+                   || nn.startsWith(normName(t.name)) || normName(t.name).startsWith(nn));
+      if(gleich){ if(gleich.lat==null){ gleich.lat=k.lat; gleich.lon=k.lon; } return; }
       treffer.push({ abk:'', name, typ:'Bahnhof', bahn:'', lat:k.lat, lon:k.lon, quelle:'öV-Haltestellen' });
     });
-    treffer=entdoppeln(treffer);
   }catch(e){ if(e.name==='AbortError') return; }
   if(ctrl.signal.aborted) return;
 
-  if(!treffer.length){
-    trefferZeigen([], 'Nichts gefunden — Felder von Hand ausfüllen');
-    return;
-  }
-  const sortieren=()=>treffer.sort((a,b)=>
-    (b.abk?1:0)-(a.abk?1:0)
-    || (normName(a.name).startsWith(normName(q))?0:1)-(normName(b.name).startsWith(normName(q))?0:1)
-    || a.name.localeCompare(b.name,'de'));
-  sortieren();
-  trefferZeigen(treffer.slice(0,25), 'Abkürzungen werden ergänzt …');
-
-  try{
-    /* Steht das Verzeichnis, sind die Abkürzungen schon dabei */
-    const geaendert=VERZEICHNIS ? false : await abkuerzungenNachtragen(treffer, ctrl.signal);
-    if(ctrl.signal.aborted) return;
-    if(geaendert) treffer=entdoppeln(treffer);
-  }catch(e){ if(e.name==='AbortError') return; }
-
-  sortieren();
-  trefferZeigen(treffer.slice(0,25));
+  treffer.sort((a,b)=>(b.abk?1:0)-(a.abk?1:0));
+  trefferZeigen(treffer.slice(0,30));
 }
 
 
@@ -1489,8 +1422,9 @@ function formularStrecke(id, uebernahme){
 }
 function bpAuswahlHtml(){
   const erfasst=S.punkte.slice().sort((a,b)=>a.name.localeCompare(b.name,'de'));
-  const offen=STAMM_BP.filter(([abk])=>!S.punkte.some(p=>p.abk===abk))
-    .slice().sort((a,b)=>a[1].localeCompare(b[1],'de'));
+  const offen=BP_LISTE.filter(e=>!S.punkte.some(p=>p.abk===e.abk))
+    .map(e=>[e.abk, e.name])
+    .sort((a,b)=>a[1].localeCompare(b[1],'de'));
   const gruppen={};
   erfasst.forEach(p=>{ const b=p.bahn||'Ohne Angabe'; (gruppen[b]=gruppen[b]||[]).push(p); });
   const reihen=Object.keys(gruppen).sort((a,b)=>a==='SBB'?-1:b==='SBB'?1:a.localeCompare(b,'de'));
@@ -1510,6 +1444,7 @@ function zeichneBpWahl(){
 }
 
 function formularPunkt(id){
+  abkIndexLaden();               // schlank, läuft im Hintergrund
   const p=id?punkt(id):null;
   ENTWURF=p?{...p}:{id:null,abk:'',name:'',typ:'Bahnhof',bahn:'',notiz:''};
   const typen=['Bahnhof','Rangierbahnhof','Haltestelle','Abzweigung','Anschlussgleis','Abstellanlage','Betriebsausweichstelle','Dienststation','Depot / Werkstätte','Grenzpunkt','Tunnelportal'];
@@ -1517,8 +1452,8 @@ function formularPunkt(id){
     <div class="hinweis">Anlagen sind gemeinsame Stammdaten und dienen zugleich als Betriebspunkte der Strecken.</div>
     ${p?'':`<label><span>Bahnhof suchen</span><input id="p-suche" placeholder="Name eingeben, z. B. Ausserberg" autocomplete="off"></label>
     <div class="vorschlaege" id="p-treffer" hidden></div>
-    ${VERZEICHNIS?'':'<div class="hinweis">Abkürzungen werden je Treffer nachgeschlagen. Wer das Verzeichnis unter Konto einmal vollständig lädt, hat sie sofort.</div>'}`}
-    <datalist id="abkliste">${STAMM_BP.map(([a,n])=>`<option value="${esc(a)}">${esc(n)}</option>`).join('')}</datalist>
+    <div class="hinweis">1243 amtliche Betriebspunkte von SBB und BLS sind fest hinterlegt — Suche nach Name oder Abkürzung, ohne Wartezeit.</div>`}
+    <datalist id="abkliste">${BP_LISTE.map(e=>`<option value="${esc(e.abk)}">${esc(e.name)}</option>`).join('')}</datalist>
     <div class="zweispaltig">
       <label><span>Abkürzung</span><input id="p-abk" list="abkliste" value="${esc(ENTWURF.abk)}" maxlength="8" placeholder="OL" style="font-family:var(--mono);text-transform:uppercase"></label>
       <label><span>Typ</span><select id="p-typ">${typen.map(t=>`<option${ENTWURF.typ===t?' selected':''}>${t}</option>`).join('')}</select></label>
@@ -1905,35 +1840,1326 @@ const TATEN = {
   'beispiel': async ()=>{ await beispieldaten(); await alleLaden(); zeichnen(); }
 };
 
-/* ---------- Verzeichnis bekannter Betriebspunkte ----------
-   Abkürzungen aus der SBB-Übersicht R 30131, Koordinaten gerundet.
-   Dient als Vorschlagsliste beim Erfassen und als Beispieldaten.   */
-const STAMM_BP=[
-  ['BS','Basel SBB',47.5474,7.5896],       ['PR','Pratteln',47.5210,7.6930],
-  ['SIS','Sissach',47.4640,7.8110],        ['OL','Olten',47.3519,7.9077],
-  ['AA','Aarau',47.3914,8.0512],           ['LB','Lenzburg',47.3906,8.1735],
-  ['BRGG','Brugg AG',47.4808,8.2081],      ['BAD','Baden',47.4763,8.3084],
-  ['ZAS','Zürich Altstetten',47.3915,8.4890], ['ZUE','Zürich HB',47.3779,8.5403],
-  ['OGL','Zürich Oerlikon',47.4114,8.5442],['W','Winterthur',47.5003,8.7238],
-  ['WL','Wil SG',47.4634,9.0450],          ['GSS','Gossau SG',47.4155,9.2530],
-  ['SG','St. Gallen',47.4231,9.3696],      ['SH','Schaffhausen',47.6987,8.6329],
-  ['RH','Romanshorn',47.5657,9.3789],      ['ZG','Zug',47.1739,8.5153],
-  ['RK','Rotkreuz',47.1443,8.4330],        ['LZ','Luzern',47.0502,8.3103],
-  ['GD','Arth-Goldau',47.0501,8.5464],     ['AL','Altdorf',46.8790,8.6420],
-  ['GOE','Göschenen',46.6660,8.5860],      ['BEL','Bellinzona',46.1954,9.0296],
-  ['LUG','Lugano',46.0053,8.9470],         ['CH','Chur',46.8531,9.5289],
-  ['SA','Sargans',47.0459,9.4453],         ['ZB','Ziegelbrücke',47.1359,9.0637],
-  ['BN','Bern',46.9490,7.4396],            ['BDF','Burgdorf',47.0570,7.6203],
-  ['LGUT','Langenthal',47.2148,7.7897],    ['SO','Solothurn',47.2019,7.5348],
-  ['TH','Thun',46.7549,7.6294],            ['SP','Spiez',46.6862,7.6800],
-  ['FR','Frutigen',46.5880,7.6510],        ['IO','Interlaken Ost',46.6906,7.8690],
-  ['VI','Visp',46.2938,7.8817],            ['BR','Brig',46.3195,7.9880],
-  ['FRI','Fribourg',46.8032,7.1512],       ['LS','Lausanne',46.5169,6.6291],
-  ['GE','Genève',46.2102,6.1424],          ['MG','Martigny',46.1010,7.0722],
-  ['SIO','Sion',46.2273,7.3272],           ['BI','Biel/Bienne',47.1327,7.2436],
-  ['NE','Neuchâtel',46.9968,6.9364],       ['DMT','Delémont',47.3648,7.3494],
-  ['YV','Yverdon-les-Bains',46.7645,6.6425], ['ISE','Iselle di Trasquera',46.2560,8.1720]
-];
+/* ============================================================
+   Amtliches Betriebspunktverzeichnis — SBB und BLS Netz AG
+   Quellen: atlas / Open Data-Plattform Mobilität Schweiz
+   (Dienststellen v2, Stand 19.08.2026) und Perron-/Gleisübersicht
+   BLS Netz AG, gültig ab 6. Juni 2026.
+   Aufbau je Zeile: Abkürzung|Bezeichnung|Betreiberin
+   ============================================================ */
+const BP_ROH = `AA|Aarau|SBB
+AAGB|Aarau GB|SBB
+AAT|Aathal|SBB
+ABE|Aarberg|SBB
+ABO|Aarburg-Oftringen|SBB
+AD|Aadorf|SBB
+AE|Aesch BL|SBB
+AESP|Aespli|SBB
+AF|Affoltern am Albis|SBB
+AGIP|Monthey Agip (embr)|SBB
+AHAU|Altishausen|SBB
+AI|Airolo|SBB
+AIG|Aigle|SBB
+AL|Altdorf UR|SBB
+ALG|Algetshausen-Henau|SBB
+ALL|Allaman|SBB
+ALLM|Allmendingen BE Süd (Spw)|SBB
+ALM|Al Motto (c bin)|SBB
+ALN|Altnau|SBB
+ALRH|Altenrhein|SBB
+ALSA|Al Sasso|SBB
+ALT|Altstätten SG|SBB
+ALTD|Altendorf|SBB
+AN|Andelfingen|SBB
+AP|Ambrì-Piotta|SBB
+AR|Altenburg-Rheinau|SBB
+ARB|Arbon|SBB
+ARBS|Arbon Seemoosriet|SBB
+ARCH|Arch|SBB
+ARCY|Archy (bif)|SBB
+ARD|Ardon|SBB
+ARN|Arnegg|SBB
+AS|Amsteg-Silenen|SBB
+ASKO|Amsteg Kabelstollen Ost|SBB
+ASSW|Amsteg Kabelstollen West|SBB
+ASZO|Amsteg Zugangsstollen Ost|SBB
+ASZW|Amsteg Zugangsstollen West|SBB
+AU|Au ZH|SBB
+AUSG|Au SG|SBB
+AUV|Auvernier|SBB
+AV|Avenches|SBB
+AVRY|Avry-Matran|SBB
+AW|Amriswil|SBB
+AX|Arnex|SBB
+BAA|Baar|SBB
+BAAL|Baar Lindenpark|SBB
+BAAN|Baar Neufeld|SBB
+BACH|Bachtele (Trimstein)|SBB
+BADT|Basel Bad Bf Tiefbahnhof|SBB
+BAE|Bäch SZ|SBB
+BAER|Bärschwil|SBB
+BAL|Balerna|SBB
+BALT|Baltschieder (Agl)|SBB
+BAV|Bavois|SBB
+BAZ|Bazenheid|SBB
+BAZM|Bazenheid MICARNA (Abzw)|SBB
+BAZZ|Bazenheid ZAB (Agl)|SBB
+BCT|Boncourt|SBB
+BD|Baden|SBB
+BDF|Burgdorf|SBB
+BDO|Baden Oberstadt|SBB
+BDR|Boudry|SBB
+BEL|Bellinzona|SBB
+BELE|Bellach Industrie|SBB
+BELL|Bellach|SBB
+BEPI|Bellinzona Piazza Indipendenza|SBB
+BER|Berlingen|SBB
+BERG|Berg|SBB
+BET|Bettlach|SBB
+BEX|Bex|SBB
+BF|Belfaux CFF|SBB
+BG|Brugg AG|SBB
+BGG|Brügg BE|SBB
+BGL|Bürglen TG|SBB
+BGN|Brugg AG Nord (Abzw)|SBB
+BGS|Brugg AG Süd (Abzw)|SBB
+BI|Biel/Bienne|SBB
+BIA|Biasca|SBB
+BIBD|Biel/Bienne Bözingenfeld/Champ|SBB
+BIL|Bilten|SBB
+BIM|Biel Mett|SBB
+BIMA|Biel Mett (Abzw)|SBB
+BIPO|Biel Produktionsanlage Ost|SBB
+BIR|Birmensdorf ZH|SBB
+BIRB|Biel/Bienne RB|SBB
+BIRI|Birmensdorf Industrie|SBB
+BIRR|Birr|SBB
+BLG|Baldegg|SBB
+BLGK|Baldegg Kloster|SBB
+BLL|Ballwil|SBB
+BLU|Blumenau|SBB
+BMA|Bauma|SBB
+BN|Bern|SBB
+BNAS|Bern Europaplatz|SBB
+BNBS|Bern Bümpliz Süd|SBB
+BNG|Bussnang|SBB
+BNK|Benken SG|SBB
+BNWD|Bern Wankdorf|SBB
+BNWF|Bern Wylerfeld|SBB
+BNWM|Bern Weyermannshaus|SBB
+BNZ|Benzenschwil|SBB
+BO|Bodio TI|SBB
+BOAN|Bodio cunicolo di aggira. nord|SBB
+BOCS|Bodio cunicolo di aggira. sud|SBB
+BOL|Bollingen|SBB
+BOLE|Bôle|SBB
+BOMO|Bossy Moulins (embr)|SBB
+BON|Bonstetten-Wettswil|SBB
+BONI|Boniswil|SBB
+BOS|Boswil-Bünzen|SBB
+BOSS|Bossière|SBB
+BOT|Bottighofen|SBB
+BOU|Bouveret|SBB
+BOV|Boveresse|SBB
+BOW|Bowil|SBB
+BOZN|Bözberg Zugangsstollen Nord|SBB
+BOZS|Bözberg Zugangsstollen Süd|SBB
+BR|Brig|SBB
+BRAG|Bad Ragaz|SBB
+BRE|Bret [F]|SBB
+BRG|Bargen BE|SBB
+BRGG|Brunegg|SBB
+BRGL|Brüglen (Spw)|SBB
+BRIT|Brittnau-Wikon|SBB
+BRM|Brunnmatt (Spw)|SBB
+BRO|Bronschhofen|SBB
+BROA|Bronschhofen AMP|SBB
+BRRB|Brig RB|SBB
+BRT|Bretonnières|SBB
+BRTU|Brig Tunnel|SBB
+BRU|Brunnen|SBB
+BS|Basel SBB|SBB
+BSC|Bassecourt|SBB
+BSD|Bassersdorf|SBB
+BSDH|Basel Dreispitz|SBB
+BSDN|Dreispitz Nord (Spw)|SBB
+BSDS|Basel SBB Dreispitz|SBB
+BSGB|Basel SBB GB|SBB
+BSGI|Basel Gundeli Ost (Abzw)|SBB
+BSGW|Basel SBB GB West (Spw)|SBB
+BSHM|Hagnau Mitte (Spw)|SBB
+BSJA|Basel St. Jakob|SBB
+BSK|Basel Klybeck|SBB
+BSKO|Basel Klybeck Ost (Spw)|SBB
+BSM|Basel Mitte|SBB
+BSRB|Basel SBB RB|SBB
+BSSJ|Basel St. Johann|SBB
+BST|Basel SBB Tiefbahnhof|SBB
+BSVB|Basel VB Grenze|SBB
+BSWH|Basel Werkstätte Hardacker|SBB
+BTW|Bettwiesen|SBB
+BU|Buchs SG|SBB
+BUB|Bubikon|SBB
+BUC|Buckten|SBB
+BUD|Buchs-Dällikon|SBB
+BUDZ|Burgau Deponie ZAB (Agl)|SBB
+BUE|Bülach|SBB
+BUEO|Bützberg Ost (Agl)|SBB
+BUER|Büren an der Aare|SBB
+BUET|Bütschwil|SBB
+BUHA|Buchhalde (Spw)|SBB
+BURE|Bure-Casernes|SBB
+BURI|Burier|SBB
+BURN|Buchrain|SBB
+BUS|Busswil BE|SBB
+BV|Bevaix|SBB
+BW|Beinwil am See|SBB
+BWL|Birrwil|SBB
+BWMS|Bern Weyermannshaus (Spw)|SBB
+BWY|Bern Wyler|SBB
+BX|Buix|SBB
+BY|Bussigny|SBB
+BZ|Bressonnaz|SBB
+BZN|Bischofszell Nord|SBB
+BZS|Bischofszell Stadt|SBB
+CABA|Lancy-Bachet|SBB
+CABV|Monthey Centre agr Bas-V (embr|SBB
+CAMO|Camorino (dira)|SBB
+CAOF|Castione Officine (Stas)|SBB
+CAP|Capolago-Riva S. Vitale|SBB
+CASN|Castione Nord (c bin)|SBB
+CAST|Castione-Arbedo|SBB
+CBY|Collombey|SBB
+CC|Concise|SBB
+CCH|Courchavon|SBB
+CD|Cadenazzo|SBB
+CDM|Champ-du-Moulin|SBB
+CEL|Céligny|SBB
+CF|La Chaux-de-Fonds|SBB
+CFO|La Chaux-de-Fonds Les Forges|SBB
+CFV|Courfaivre|SBB
+CG|Courgenay|SBB
+CGY|Cugy FR|SBB
+CH|Chur|SBB
+CHA|Chamoson-St-Pierre-de-Clages|SBB
+CHAA|Cham Alpenblick|SBB
+CHAM|Cham|SBB
+CHAP|Chapelle (diag)|SBB
+CHAR|Charrat-Fully|SBB
+CHAT|Châtillens|SBB
+CHAV|Chavannes|SBB
+CHE|Chénens|SBB
+CHEB|Chêne-Bourg|SBB
+CHEF|Chêne-Bourg-Frontière|SBB
+CHF|Châteauneuf-Conthey|SBB
+CHHO|Genève-Champel|SBB
+CHI|Chiasso|SBB
+CHIG|Chiggiogna (c bin)|SBB
+CHN|Chambrelien|SBB
+CHNE|Châtelaine (bif)|SBB
+CHP|Yverdon-Champ Pittet|SBB
+CHRI|Chriesbach (Abzw)|SBB
+CHS|Cheyres|SBB
+CHSM|Chiasso Smistamento|SBB
+CHV|Chavornay|SBB
+CHX|Chexbres-Village|SBB
+CHY|Chambésy|SBB
+CHZ|Choindez|SBB
+CL|Clarens|SBB
+CLA|Claro|SBB
+CLB|Colombier NE|SBB
+CN|Corcelles-Nord|SBB
+CO|Cortébert|SBB
+COG|Corgémont|SBB
+COI|Vernier|SBB
+COL|Le Locle-Col-des-Roches|SBB
+COP|Coppet|SBB
+CORI|Cornaux industrie|SBB
+CORM|Cormoret|SBB
+CORN|Cornaux NE|SBB
+CORS|Corseaux-Cornalles|SBB
+COS|Cossonay-Penthalaz|SBB
+COT|Cottens FR|SBB
+COUS|Cousset|SBB
+CP|Corcelles-Peseux|SBB
+CR|Croy-Romainmôtier|SBB
+CRA|Crans VD|SBB
+CRET|Le Crêt-du-Locle|SBB
+CRGD|Creux-de-Genthod|SBB
+CRMI|Charmilles (diag)|SBB
+CRNE|Cressier NE|SBB
+CRTT|Tunnel des Crêtes (diag)|SBB
+CS|Corcelles-Sud|SBB
+CT|Court|SBB
+CTM|Courtemaîche|SBB
+CTT|Courtételle|SBB
+CTY|Courtelary|SBB
+CU|Cully|SBB
+CV|Convers|SBB
+CVN|La Conversion|SBB
+CVT|Couvet CFF|SBB
+DA|Dachsen|SBB
+DAET|Dättwil|SBB
+DAG|Dagmersellen|SBB
+DAIL|Daillens|SBB
+DAY|Le Day|SBB
+DEN|Denges-Echandens|SBB
+DER|Derendingen|SBB
+DEU|Les Deurres|SBB
+DI|Dielsdorf|SBB
+DIE|Diepflingen|SBB
+DIH|Dinhard|SBB
+DK|Däniken SO|SBB
+DKRB|Däniken RB|SBB
+DLF|Delle-Frontière|SBB
+DMT|Delémont|SBB
+DN|Deitingen|SBB
+DOE|Döttingen|SBB
+DOM|Domdidier|SBB
+DON|Dotzigen|SBB
+DOP|Dompierre FR|SBB
+DOPP|Doppleschwand-Romoos|SBB
+DOR|Dornach-Arlesheim|SBB
+DORF|Dorfnest (Abzw)|SBB
+DOSS|Dossenboden (Spw)|SBB
+DOT|Dottikon-Dintikon|SBB
+DOTU|Dottikon Umspannanlage|SBB
+DSB|Diesbach-Betschwanden|SBB
+DSH|Diessenhofen|SBB
+DT|Dietikon|SBB
+DTF|Dietfurt|SBB
+DTL|Dietlikon|SBB
+DU|Dulliken|SBB
+DUE|Dübendorf|SBB
+DUED|Düdingen|SBB
+DUG|Duggingen|SBB
+DUGN|Duggingen Nord (Ausw)|SBB
+EBI|Ebikon|SBB
+EBR|Emmenbrücke|SBB
+ECL|Eclépens|SBB
+ECU|Ecublens-Rue|SBB
+EDA|Ennenda|SBB
+EF|Effretikon|SBB
+EFG|Effingen|SBB
+EG|Egerkingen|SBB
+EGL|Eglisau|SBB
+EGN|Egnach|SBB
+EGW|Eggwald (Spw)|SBB
+EI|Eiken|SBB
+EINF|Einfang (Abzw)|SBB
+EL|Elgg|SBB
+EMB|Embrach-Rorbas|SBB
+EMM|Emmenmatt|SBB
+ENT|Entlebuch|SBB
+EP|Ependes VD|SBB
+EPS|Epesses|SBB
+ER|Erstfeld|SBB
+ERL|Erlen|SBB
+ERLB|Erlenbach ZH|SBB
+ERM|Ermatingen|SBB
+ESB|Eschenbach LU|SBB
+ESCH|Escholzmatt|SBB
+ESEE|Ermensee|SBB
+ESL|Eschlikon TG|SBB
+ESP|Essert-Pittet|SBB
+EST|Estavayer-le-Lac|SBB
+ETOY|Etoy|SBB
+EULG|Eulach Landesgrenze|SBB
+EV|Evionnaz|SBB
+EVOU|Les Evouettes|SBB
+EW|Etzwilen|SBB
+EYSI|Eysins (embr)|SBB
+EZ|Eschenz|SBB
+EZG|Etzgen|SBB
+FA|Faido|SBB
+FACE|Faido cunicolo di acc. est|SBB
+FACO|Faido cunicolo di acc. ovest|SBB
+FB|Feldbach|SBB
+FCK|Frick|SBB
+FE|Felsenau AG|SBB
+FEL|Felben-Wellhausen|SBB
+FET|Fehraltorf|SBB
+FF|Frauenfeld|SBB
+FG|Faoug|SBB
+FI|Fischenthal|SBB
+FISH|Fischerhölzli|SBB
+FL|Flüelen|SBB
+FLA|Flawil|SBB
+FLM|Flamatt|SBB
+FLMD|Flamatt Dorf|SBB
+FMS|Flums|SBB
+FMUE|Fluhmühle (Abzw)|SBB
+FOU|Founex|SBB
+FRAE|Fräschels|SBB
+FRB|Freienbach SBB|SBB
+FRE|Frenkendorf-Füllinsdorf|SBB
+FREU|Freudenberg|SBB
+FRI|Fribourg/Freiburg|SBB
+FRIN|Frinvillier-Taubenloch|SBB
+FRNO|Fribourg Nord|SBB
+FRPO|Fribourg/Freiburg Poya|SBB
+FSMF|Faido SMF|SBB
+FT|Feuerthalen|SBB
+FU|Full|SBB
+FUBI|Furet (bif)|SBB
+GA|Gampel-Steg|SBB
+GAGC|Gaggiolo Confine|SBB
+GAMS|Gamsen SBB|SBB
+GBAL|Gland Ballastière|SBB
+GD|Arth-Goldau|SBB
+GDA|Gordola|SBB
+GDBE|Genthod-Bellevue|SBB
+GDMF|Goldau Mühlefluh (Verzw)|SBB
+GE|Genève|SBB
+GEAP|Genève-Aéroport|SBB
+GEC|Les Geneveys-sur-Coffrane|SBB
+GELF|Gelfingen|SBB
+GELL|Gellert|SBB
+GEPR|Genève-La-Praille|SBB
+GER|Gerra (Gambarogno)|SBB
+GESE|Genève-Sécheron|SBB
+GESO|Genève-Souterraine|SBB
+GEST|Genève-Stade|SBB
+GEV|Genève-Eaux-Vives|SBB
+GEXI|Gexi|SBB
+GF|Glattfelden|SBB
+GIB|Gibswil|SBB
+GIBU|Gilly-Bursinel|SBB
+GIDI|Giustizia (dira)|SBB
+GIO|Giornico|SBB
+GIOC|Giornico (c bin)|SBB
+GIOV|Monthey Giovanola (embr)|SBB
+GIU|Giubiasco|SBB
+GIV|Givisiez|SBB
+GKD|Gelterkinden|SBB
+GL|Glarus|SBB
+GLA|Gland|SBB
+GLAO|Gland Ouest|SBB
+GLB|Glattbrugg|SBB
+GLO|Glovelier|SBB
+GLZB|Glanzenberg|SBB
+GM|Granges-Marnand|SBB
+GMT|Gruemet (Abzw)|SBB
+GOE|Göschenen|SBB
+GOL|Goldach|SBB
+GOR|Gorgier-St-Aubin|SBB
+GOTN|Gotthard Nord (Spw)|SBB
+GOTS|Gottardo Sud (c bin)|SBB
+GRA|Grandgourt|SBB
+GRAL|Granges-Lens|SBB
+GREL|Grellingen|SBB
+GRIL|En Grillon (diag)|SBB
+GRO|Grolley|SBB
+GRS|Grandson|SBB
+GRUO|Gruonbach (Spw)|SBB
+GRV|Grandvaux|SBB
+GRWV|Grellingen West (Spw)|SBB
+GS|Grenchen Süd|SBB
+GSAG|Emmenbrücke Gersag|SBB
+GSK|Gisikon-Root|SBB
+GSS|Gossau SG|SBB
+GSSO|Gossau-Sommerau (Agl)|SBB
+GTS|Gütsch (Abzw)|SBB
+GU|Gurtnellen|SBB
+GUE|Gümligen|SBB
+GUES|Gümligen Süd (Abzw)|SBB
+GUET|Güttingen|SBB
+GUN|Guntershausen|SBB
+GZ|Galmiz|SBB
+HAE|Hägendorf|SBB
+HAF|Hafen Bäch (Spw)|SBB
+HAG|Haag-Gams|SBB
+HAHO|Hagenholz (Abzw)|SBB
+HAS|Hasle LU|SBB
+HB|Herzogenbuchsee|SBB
+HBK|Hindelbank|SBB
+HBLO|Heitersberglinie Ost (Abzw)|SBB
+HBN|Herzogenbuchsee Nord (Ge)|SBB
+HBTN|Hauenstein Nord (Spw)|SBB
+HBTS|Hauenstein Süd (Spw)|SBB
+HD|Hallwil|SBB
+HDK|Hendschiken|SBB
+HEBG|Heerbrugg|SBB
+HED|Hedingen|SBB
+HEDN|Hedingen Nord (Abzw)|SBB
+HEIM|Heimbach (Spw)|SBB
+HEN|Henniez|SBB
+HERL|Herrliberg-Feldmeilen|SBB
+HET|Hettlingen|SBB
+HG|Horgen|SBB
+HGO|Horgen Oberdorf|SBB
+HGT|Henggart|SBB
+HGV|Les Hauts-Geneveys|SBB
+HI|Hinwil|SBB
+HIK|Hitzkirch|SBB
+HM|Hüttlingen-Mettendorf|SBB
+HN|Horn|SBB
+HNS|Hornussen|SBB
+HO|Hochdorf|SBB
+HOBK|Holderbank AG|SBB
+HOSA|Hochdorf Schönau|SBB
+HOT|Horchental|SBB
+HPT|Hauptwil|SBB
+HRD|Hard Käferberg (Abzw)|SBB
+HRDF|Hardfeld (Spw)|SBB
+HRK|Härkingen Post|SBB
+HU|Hunzenschwil|SBB
+HUCH|Hünenberg Chämleten|SBB
+HUEB|Hübeli LU|SBB
+HUER|Hürlistein (Abzw)|SBB
+HUEW|Hüntwangen-Wil|SBB
+HUZY|Hünenberg Zythus|SBB
+IL|Illnau|SBB
+IM|Immensee|SBB
+ISL|Islikon|SBB
+ISTU|Iselle portail tunnel|SBB
+IT|Itingen|SBB
+JE|Jestetten|SBB
+JES|Jestetten Süd|SBB
+JO|Jona|SBB
+JON|Jonction (Genève)|SBB
+KAAG|Kaiserstuhl AG|SBB
+KAB|Kaltbrunn|SBB
+KAIO|Kaisten Ost (Abzw)|SBB
+KAL|Kallnach|SBB
+KAU|Kaiseraugst|SBB
+KB|Koblenz|SBB
+KBD|Koblenz Dorf|SBB
+KBGR|Koblenz Grenze|SBB
+KE|Kemptthal|SBB
+KF|Konolfingen|SBB
+KGD|Küngoldingen|SBB
+KGO|Küsnacht Goldbach|SBB
+KHF|Kehlhof|SBB
+KHGR|Kreuzlingen Hafen Grenze|SBB
+KI|Kiesen|SBB
+KIL|Kilchberg ZH|SBB
+KIM|Kirchmatt (Spw)|SBB
+KK|Kölliken|SBB
+KKO|Kölliken Oberdorf|SBB
+KL|Kloten|SBB
+KLB|Kloten Balsberg|SBB
+KLI|Klingnau|SBB
+KLLG|Klettgau Landesgrenze|SBB
+KLW|Killwangen-Spreitenbach|SBB
+KMUE|Zug Chollermüli|SBB
+KN|Kempten|SBB
+KNO|Knonau|SBB
+KOL|Kollbrunn|SBB
+KOLM|Kollermühle (Abzw)|SBB
+KPT|Kempraten|SBB
+KR|Kreuzlingen|SBB
+KRA|Kradolf|SBB
+KRB|Kreuzlingen Bernrain|SBB
+KRGR|Kreuzlingen Grenze|SBB
+KRH|Kreuzlingen Hafen|SBB
+KUE|Küssnacht am Rigi|SBB
+KUES|Küsnacht ZH|SBB
+KURZ|Kurzrickenbach Seepark|SBB
+KWL|Kesswil|SBB
+KZ|Kerzers|SBB
+KZPP|Kerzers Papiliorama|SBB
+LA|Lachen SZ|SBB
+LACL|La Clef|SBB
+LAM|Lamone-Cadempino|SBB
+LAN|Langwiesen|SBB
+LANG|Langacher (Spw)|SBB
+LAPR|Lancy-Pont-Rouge|SBB
+LAV|Lavorgo|SBB
+LB|Lenzburg|SBB
+LBA|Les Bayards|SBB
+LBD|Root D4|SBB
+LCR|Le Creux|SBB
+LD|Le Landeron|SBB
+LDS|Landschlacht|SBB
+LDT|Luzern Dreilindentunnel (Spw)|SBB
+LE|Leuzigen|SBB
+LECH|Léchelles|SBB
+LECR|Lécheires (bif)|SBB
+LEI|Leibstadt|SBB
+LEN|Lengnau BE|SBB
+LENG|Lengwil|SBB
+LF|Läufelfingen|SBB
+LFG|Laufenburg|SBB
+LFN|Laufen|SBB
+LG|Lugano|SBB
+LGB|Leuggelbach|SBB
+LGCL|Landesgrenze CH-Liechtenstein|SBB
+LGP|Paradiso|SBB
+LGPC|Paradiso (c bin)|SBB
+LGUT|Löchligut (Abzw)|SBB
+LGV|Lugano Vedeggio|SBB
+LHE|La Heutte|SBB
+LIG|Ligerz|SBB
+LIN|Linthal|SBB
+LINB|Linthal Braunwaldbahn|SBB
+LIT|Luzern Littau|SBB
+LITA|Litti Albistunnel, Wendeanlage|SBB
+LITN|Litti Nord (Stellwerk)|SBB
+LITT|Litti (Baar)|SBB
+LK|Leuk|SBB
+LLA|La Lance (diag)|SBB
+LN|Langnau i.E.|SBB
+LO|Locarno|SBB
+LOC|Le Locle|SBB
+LOCF|Le Locle-Frontière|SBB
+LOEW|Muntelier-Löwenberg|SBB
+LON|Lonay-Préverenges|SBB
+LOSI|Losinger (embr)|SBB
+LOT|Lottstetten|SBB
+LOTS|Lottstetten Süd (Verzw)|SBB
+LP|La Plaine|SBB
+LPFR|La Plaine-Frontière|SBB
+LPN|Laupen BE|SBB
+LQ|Landquart|SBB
+LS|Lausanne|SBB
+LSA|La Sarraz|SBB
+LSB|Liesberg|SBB
+LSBI|Lausanne (bif)|SBB
+LSN|Lausen|SBB
+LSSB|Lausanne-Sébeillon|SBB
+LST|Liestal|SBB
+LSTD|Lausanne TRIDEL|SBB
+LT|Lausanne-Triage|SBB
+LTG|Langenthal GB|SBB
+LTH|Langenthal|SBB
+LTN|Lausanne-Triage Nord|SBB
+LTY|Lutry|SBB
+LU|Luchsingen-Hätzingen|SBB
+LUC|Lucens|SBB
+LUE|Lüsslingen|SBB
+LUET|Lütisburg|SBB
+LUPF|Lupfig|SBB
+LUT|Luterbach-Attisholz|SBB
+LUY|Lussy FR|SBB
+LVE|Le Verney (embr)|SBB
+LY|Lyss|SBB
+LYGR|Lyss Grien|SBB
+LYS|Lyssach|SBB
+LZ|Luzern|SBB
+LZGB|Luzern Cargo|SBB
+LZTB|Luzern Tiefbahnhof|SBB
+LZVH|Luzern Verkehrshaus|SBB
+MA|Martigny|SBB
+MAD|Madretsch|SBB
+MAE|Märwil|SBB
+MAEG|Mägenwil|SBB
+MAEN|Männedorf|SBB
+MAER|Märstetten|SBB
+MAG|Magadino-Vira|SBB
+MAH|Mahlenwald|SBB
+MAL|Malters|SBB
+MAM|Mammern|SBB
+MANM|Mandement (diag)|SBB
+MANN|Mannenbach-Salenstein|SBB
+MAR|Maroggia-Melano|SBB
+MAS|Massongex|SBB
+MASN|Massagno Nord|SBB
+MAT|Mattstetten (Km-Sprung)|SBB
+MB|Malleray-Bévilard|SBB
+MBGO|Mülberg Ost|SBB
+MBGW|Mülberg West|SBB
+MCEN|Monte Ceneri Nord|SBB
+MD|Moudon|SBB
+MDE|Melide|SBB
+MDEC|Melide Centrale (bif)|SBB
+MEDE|Meder (Verzw)|SBB
+MEG|Meggen|SBB
+MEGZ|Meggen Zentrum|SBB
+MEIB|Meilibach (Abzw)|SBB
+MEL|Mellingen|SBB
+MELH|Mellingen Heitersberg|SBB
+MELN|Mellikon|SBB
+MELS|Mels|SBB
+MEN|Mendrisio|SBB
+MERL|Merlischachen|SBB
+MEZ|Mezzovico|SBB
+MEZC|Mezzovico (c bin)|SBB
+MF|Maienfeld|SBB
+MG|Murg|SBB
+MGT|Murgenthal|SBB
+MH|Mühlehorn|SBB
+MI|Muri AG|SBB
+MIES|Mies|SBB
+MINU|Minusio|SBB
+MIT|Mitlödi|SBB
+ML|Meilen|SBB
+MML|Montmollin-Montezillon|SBB
+MO|Mosen|SBB
+MOE|Möhlin|SBB
+MOER|Mörschwil|SBB
+MOGN|Mognatta (B)|SBB
+MOLS|Mols|SBB
+MOR|Morges|SBB
+MOSM|Mendrisio S. Martino|SBB
+MOU|Moutier|SBB
+MPF|Mumpf|SBB
+MRL|Moreillon|SBB
+MRT|Murten/Morat|SBB
+MS|Münsingen|SBB
+MSCH|Münsterlingen-Scherzingen|SBB
+MSPI|Münsterlingen Spital|SBB
+MST|Münchenstein|SBB
+MTH|Monthey|SBB
+MTHI|Monthey Industrie|SBB
+MTL|Marthalen|SBB
+MTM|Mettmenstetten|SBB
+MTR|Matran|SBB
+MU|Muttenz|SBB
+MUEB|Münchenbuchsee|SBB
+MUEH|Mühlau|SBB
+MUEL|Müllheim-Wigoltingen|SBB
+MUN|Muntelier|SBB
+MUR|Murat (diag)|SBB
+MWIA|Münchwilen AG (Abzw)|SBB
+MX|Montreux|SBB
+NAEF|Näfels-Mollis|SBB
+NAEN|Nänikon-Greifensee|SBB
+NB|Niederbipp|SBB
+NE|Neuchâtel|SBB
+NEB|Nebikon|SBB
+NEBI|Neuchâtel-Vauseyon (bif)|SBB
+NEGW|Neugut West bei DUE (Abzw)|SBB
+NESE|Neuchâtel-Serrières|SBB
+NET|Netstal|SBB
+NEVS|Neuchâtel-Vauseyon|SBB
+NEY|Neyruz FR|SBB
+NG|Niederglatt ZH|SBB
+NGG|Neuenegg|SBB
+NGR|Neugrüt (Verzw)|SBB
+NH|Neuhausen|SBB
+NHOF|Neuenhof|SBB
+NHRH|Neuhausen Rheinfall|SBB
+NID|Nidfurn-Haslen|SBB
+NIDB|Nidelbad (Abzw)|SBB
+NIE|Niederhasli|SBB
+NIF|Niederfeld (Spw)|SBB
+NO|Nottwil|SBB
+NOI|Noiraigue|SBB
+NOU|Nieder- und Oberurnen|SBB
+NV|La Neuveville|SBB
+NW|Niederweningen|SBB
+NWA|Niederwangen|SBB
+NWD|Niederweningen Dorf|SBB
+NY|Nyon|SBB
+OA|Oberaach|SBB
+OB|Oberbuchsiten|SBB
+OBK|Oberkirch LU|SBB
+OEF|Oberentfelden|SBB
+OEN|Oensingen|SBB
+OF|Otelfingen|SBB
+OFR|Otelfingen Golfpark|SBB
+OGL|Oberglatt ZH|SBB
+OI|Oberrüti|SBB
+OL|Olten|SBB
+OLH|Olten Hammer|SBB
+OLTU|Olten Tunnel (Spw)|SBB
+OM|Obermatt|SBB
+ONB|Onnens-Bonvillars|SBB
+OP|Opfikon|SBB
+OPP|Oppikon|SBB
+OPS|Opfikon Süd|SBB
+OR|Oron|SBB
+ORD|Oberrieden|SBB
+ORDD|Oberrieden Dorf|SBB
+ORT|Oberriet SG|SBB
+OS|Osogna-Cresciano|SBB
+OSS|Ossingen|SBB
+OST|Ostermundigen|SBB
+OTH|Othmarsingen|SBB
+OWA|Oberwangen|SBB
+OWT|Oberwinterthur|SBB
+OWTP|Oberwinterthur SA Pünten|SBB
+PAL|Palézieux|SBB
+PALV|Palézieux-Village|SBB
+PARD|Pardorea (c bin)|SBB
+PAY|Payerne|SBB
+PDS|Les Paluds|SBB
+PER|Perroy|SBB
+PF|Pfäffikon SZ|SBB
+PFAF|Pfaffensprung (Spw)|SBB
+PFU|Pfungen|SBB
+PFZ|Pfäffikon ZH|SBB
+PIA|Pianotondo (c bin)|SBB
+PIE|Pieterlen|SBB
+PINC|Pino confine|SBB
+POLN|Pollegio Nord (dira)|SBB
+POLS|Pollegio binario di sorpasso|SBB
+PON|Pontenet|SBB
+POR|Porrentruy|SBB
+POU|Poudeille|SBB
+POZZ|Pozzo Negro (dira)|SBB
+PR|Pratteln|SBB
+PRAM|Pramont|SBB
+PRMA|Prilly-Malley|SBB
+PRN|Prangins|SBB
+PRSR|Pratteln Salina Raurica|SBB
+PT|Le Pont|SBB
+PTC|Pont-Céard|SBB
+PU|Pully|SBB
+PUI|Puidoux|SBB
+PUN|Pully-Nord|SBB
+QUA|Quartino|SBB
+RAET|Räterschen|SBB
+RAN|Ranconnex|SBB
+RANS|Rank (Spw)|SBB
+RAR|Raron|SBB
+RBCCHA|RBC Chablais|SBB
+RBG|Rothenburg Station|SBB
+RBGD|Emmenbrücke Kapf|SBB
+RBL|Zürich RB Limmattal|SBB
+RCK|Rheineck|SBB
+RE|Renan BE|SBB
+REB|Rebstein-Marbach|SBB
+REC|Reconvilier|SBB
+REG|Regensdorf-Watt|SBB
+REID|Reiden|SBB
+REK|Rekingen AG|SBB
+REN|Renens VD|SBB
+REU|Reuchenette-Péry|SBB
+REUT|Reutlingen|SBB
+RF|Rheinfelden|SBB
+RFAU|Rheinfelden Augarten|SBB
+RG|Reichenburg|SBB
+RH|Romanshorn|SBB
+RHS|Romanshorn Süd (Abzw)|SBB
+RHW|Romanshorn West (Abzw)|SBB
+RI|Richterswil|SBB
+RIAZ|Riazzino|SBB
+RIB|Rivera-Bironico|SBB
+RID|Riddes|SBB
+RIET|Rietheim|SBB
+RIK|Rickenbach-Attikon|SBB
+RIV|Rivaz|SBB
+RK|Rotkreuz|SBB
+RLG|Rümlingen|SBB
+RMZ|Rämismühle-Zell|SBB
+RN|Rikon|SBB
+RO|Rodi-Fiesso|SBB
+ROC|Roche VD|SBB
+ROG|Roggwil-Wynau|SBB
+ROL|Rolle|SBB
+ROM|Romont FR|SBB
+ROME|Romont Est (racc)|SBB
+ROR|Rossriet (Spw)|SBB
+ROS|Rosé|SBB
+ROTS|Rotsee (Verzw)|SBB
+RS|Rorschach|SBB
+RSHF|Rorschach Hafen|SBB
+RSST|Rorschach Stadt|SBB
+RT|Riet (Verzw)|SBB
+RTH|Rüthi SG|SBB
+RTI|Rüti bei Büren|SBB
+RTR|Rothrist|SBB
+RTW|Riedtwil|SBB
+RU|Rupperswil|SBB
+RUB|Rubigen|SBB
+RUC|Ruchfeld|SBB
+RUE|Rüti ZH|SBB
+RUEM|Rümlang|SBB
+RUEN|Rümikon AG|SBB
+RUES|Rüschlikon|SBB
+RUET|Rüti GL|SBB
+RUS|Russin|SBB
+RUTT|Rütti (Abzw)|SBB
+RW|Rapperswil SG|SBB
+RYAB|Rynächt (Abzw)|SBB
+RYN|Rynächt Nord|SBB
+RYSP|Rynächt (Spw)|SBB
+RZ|Rafz|SBB
+RZO|Ranzo-S. Abbondio|SBB
+SA|Sargans|SBB
+SAAC|Sandacher (Spw)|SBB
+SADI|Sarè (dira)|SBB
+SAF|Safenwil|SBB
+SAL|Salgesch|SBB
+SAN|S. Antonino|SBB
+SAS|Salez-Sennwald|SBB
+SASL|Sargans Schleife (Verzw)|SBB
+SAX|Saxon|SBB
+SBAD|Schinznach Bad|SBB
+SBG|Sihlbrugg|SBB
+SBL|St-Blaise CFF|SBB
+SBN|Subingen|SBB
+SBRU|Steinbruch (Agl)|SBB
+SCAE|Schänis|SBB
+SCAL|Schwalmenacker (Spw)|SBB
+SCB|Sonceboz-Sombeval|SBB
+SCBO|Sonceboz-Sombeval Ouest|SBB
+SCBU|Schübelbach-Buttikon|SBB
+SCHA|Schachen LU|SBB
+SCHB|Schönbühl SBB|SBB
+SCHD|Schwanden GL|SBB
+SCHG|Schlossberg (Signau)|SBB
+SCHH|Schüpfheim|SBB
+SCHK|Schottikon|SBB
+SCHL|Schlieren|SBB
+SCHN|Schlattingen|SBB
+SCHO|Schöfflisdorf-Oberweningen|SBB
+SCHT|Schlatt TG|SBB
+SCHW|Schwyz|SBB
+SCHZ|Schwarzenbach SG|SBB
+SCME|Schmerikon|SBB
+SCMI|Schmitten FR|SBB
+SCOE|Schönenwerd SO|SBB
+SCUB|Schüpbach (Signau)|SBB
+SCUE|Schüpfen|SBB
+SCWA|Schwaderloch|SBB
+SCWE|Schwerzenbach ZH|SBB
+SD|Saland|SBB
+SDO|Schinznach Dorf|SBB
+SE|Seon|SBB
+SEL|Selzach|SBB
+SEM|Sempach-Neuenkirch|SBB
+SENO|Seon Nord|SBB
+SETS|Sedrun Entlüftungsstollen|SBB
+SEU|Seuzach|SBB
+SEV|Sevelen|SBB
+SEVA|Sévaz|SBB
+SEZU|Sedrun Zugangsstollen|SBB
+SG|St. Gallen|SBB
+SGBR|St. Gallen Bruggen|SBB
+SGF|St. Gallen St. Fiden|SBB
+SGWI|St. Gallen Winkeln|SBB
+SH|Schaffhausen|SBB
+SHAL|Schweizerhalle|SBB
+SHAU|Siegershausen|SBB
+SHRB|Schaffhausen GB|SBB
+SIB|Siebnen-Wangen|SBB
+SIE|Sierre/Siders|SBB
+SIET|Sierre/Siders (saut km)|SBB
+SIFE|Sigirino finestra est|SBB
+SIFO|Sigirino finestra ouvest|SBB
+SIG|Siggenthal-Würenlingen|SBB
+SIGI|Sigirino|SBB
+SIGN|Signau|SBB
+SILB|Silberen (Abzw)|SBB
+SINS|Sins|SBB
+SIO|Sion|SBB
+SIR|Sirnach|SBB
+SIS|Sissach|SBB
+SIT|Sitterdorf|SBB
+SIV|Siviriez|SBB
+SIVS|Siviriez (saut km)|SBB
+SJ|St-Jean (bif)|SBB
+SK|Sisikon|SBB
+SKY|Sennhof-Kyburg|SBB
+SL|St-Léonard|SBB
+SLF|Schloss Laufen am Rheinfall|SBB
+SLG|Sulgen|SBB
+SLN|Sisseln|SBB
+SM|St-Maurice|SBB
+SMG|St. Margrethen SG|SBB
+SMLG|St. Margrethen Landesgrenze|SBB
+SN|S. Nazzaro|SBB
+SNT|Schneit|SBB
+SO|Solothurn|SBB
+SOAD|Solothurn Allmend|SBB
+SOM|Sommerau|SBB
+SOR|Sorvilier|SBB
+SORD|Sordo (c bin)|SBB
+SOY|Soyhières|SBB
+SPAO|Bellinzona S. Paolo|SBB
+SS|Sursee|SBB
+SSMF|Sedrun SMF|SBB
+ST|St-Triphon|SBB
+STA|Staad SG|SBB
+STAC|Stabio (Confine di proprietà)|SBB
+STAE|Stäfa|SBB
+STAF|Stabio|SBB
+STCH|Steinach|SBB
+STDG|Staz. della Galleria Sempione|SBB
+STE|Steinhausen|SBB
+STER|St. Erhard-Knutwil|SBB
+STET|Stettbach|SBB
+STG|Steg|SBB
+STGI|St-Gingolph (Suisse)|SBB
+STI|St-Imier|SBB
+STJ|Morges-St-Jean|SBB
+STK|Steckborn|SBB
+STKT|St. Katharinental|SBB
+STKW|St. Katharinental West|SBB
+STM|Stammheim|SBB
+STMR|Steinmaur|SBB
+STN|Steinen|SBB
+STNS|Steinen Nord (Spw)|SBB
+STP|St-Prex|SBB
+STR|Stein am Rhein|SBB
+STRI|Steinhausen Rigiblick|SBB
+STS|Stein-Säckingen|SBB
+STSA|St-Saphorin|SBB
+STU|Studen BE|SBB
+SU|St-Ursanne|SBB
+SUB|Suberg-Grossaffoltern|SBB
+SUHR|Suhr|SBB
+SV|Sonvilier|SBB
+SW|Solothurn West|SBB
+SY|Satigny|SBB
+SZ|Sulz|SBB
+TA|Tavannes|SBB
+TAEG|Tägerwilen-Gottlieben|SBB
+TAEM|Tägerwilen Dorf|SBB
+TAEN|Tägerschen|SBB
+TAFR|Tanklager Frevlig|SBB
+TALR|Tankanlage Rümlang|SBB
+TAMO|Tägermoos (Abzw)|SBB
+TAN|Tannay|SBB
+TAO|Tanklager Otelfingen|SBB
+TAOH|Tanklager Oberhasli|SBB
+TAOO|Tanklager O'fingen (Gleisende)|SBB
+TAOW|Tanklager Oberhasli (Gleisend)|SBB
+TAPI|Taillepied (diag)|SBB
+TAV|Taverne-Torricella|SBB
+TD|Tann-Dürnten|SBB
+TEN|Tenero|SBB
+TER|Territet|SBB
+TG|Turgi|SBB
+THO|Thörishaus Station|SBB
+THOD|Thörishaus Dorf|SBB
+TI|Tägertschi|SBB
+TIEF|Tiefenwinkel (Verzw)|SBB
+TK|Tecknau|SBB
+TKLL|Léchelles Tanklager (embr)|SBB
+TLH|Thalheim-Altikon|SBB
+TOA|Tobel-Affeltrangen|SBB
+TOEM|Tössmühle|SBB
+TOL|Tolochenaz|SBB
+TOUR|La Tour-de-Peilz|SBB
+TR|Travers|SBB
+TREY|Trey|SBB
+TRI|Trimbach|SBB
+TRIB|Triboltingen|SBB
+TRIM|Trimmis (Spw)|SBB
+TRUE|Trübbach Süd|SBB
+TSCH|Trubschachen|SBB
+TU|Turbenthal|SBB
+TUE|Tüscherz|SBB
+TUI|Les Tuileries|SBB
+TUR|Turtmann|SBB
+TW|Thalwil|SBB
+TWN|Twann|SBB
+UER|Uerikon|SBB
+UET|Uetikon|SBB
+UNT|Unterterzen|SBB
+URD|Urdorf|SBB
+URDW|Urdorf Weihermatt|SBB
+UST|Uster|SBB
+UTI|Uttigen|SBB
+UTW|Uttwil|SBB
+UZ|Uznach|SBB
+UZW|Uzwil|SBB
+VAL|Vallorbe|SBB
+VALF|Vallorbe-Frontière|SBB
+VAU|Vaumarcus|SBB
+VD|Vauderens|SBB
+VEN|Vengeron (diag)|SBB
+VER|Les Verrières|SBB
+VERF|Les Verrières-Frontière|SBB
+VERN|Vernayaz|SBB
+VERX|Vernex (diag)|SBB
+VEY|Veytaux-Chillon|SBB
+VEZB|Vezia (bif)|SBB
+VG|Villars-sur-Glâne|SBB
+VI|Visp|SBB
+VIGA|Vigana (c bin)|SBB
+VIL|Villeneuve VD|SBB
+VIO|Vionnaz|SBB
+VM|Meyrin|SBB
+VMC|Vernier-Meyrin Cargo|SBB
+VOU|Vouvry|SBB
+VSPW|Villnachern (Spw)|SBB
+VSX|Versoix|SBB
+VT|Villeret|SBB
+VTE|Villette VD|SBB
+VU|Vufflens-la-Ville|SBB
+VV|Vevey|SBB
+VVFU|Vevey-Funi|SBB
+VZ|Villaz-St-Pierre|SBB
+W|Winterthur|SBB
+WAA|Wangen an der Aare|SBB
+WAB|Waldibrücke|SBB
+WAE|Wädenswil|SBB
+WAL|Walenstadt|SBB
+WALS|Waltenschwil|SBB
+WANZ|Wanzwil (Abzw)|SBB
+WAS|Wassen|SBB
+WAST|Walterswil-Striegel|SBB
+WAU|Wauwil|SBB
+WB|Worb SBB|SBB
+WBOL|Wangen bei Olten|SBB
+WCH|Wichtrach|SBB
+WCHN|Walchwil Nord (Vzw)|SBB
+WCHO|Walchwil Hörndli|SBB
+WCHW|Walchwil|SBB
+WD|Wiesendangen|SBB
+WE|Wettingen|SBB
+WF|Weinfelden|SBB
+WFKV|Weinfelden KVA Thurgau (Abzw)|SBB
+WFS|Weinfelden Süd|SBB
+WGR|Winterthur Grüze|SBB
+WH|Wolhusen|SBB
+WHE|Winterthur Hegi|SBB
+WI|Wildegg|SBB
+WIG|Wiggen|SBB
+WIL|Wil SG|SBB
+WILA|Wila|SBB
+WIN|Winkel am Zürichsee|SBB
+WITZ|Witzberg (Agl)|SBB
+WK|Weiach-Kaiserstuhl|SBB
+WKD|Wankdorf (Abzw)|SBB
+WL|Wald ZH|SBB
+WN|Weesen|SBB
+WO|Wohlen AG|SBB
+WOES|Wöschnau SBB|SBB
+WS|Wallisellen|SBB
+WSEE|Winterthur Seen|SBB
+WST|Werthenstein|SBB
+WTOE|Winterthur Töss|SBB
+WUE|Wünnewil|SBB
+WUER|Würenlos|SBB
+WUZW|Würenlingen Zwischenlager(Agl)|SBB
+WWAL|Winterthur Wallrüti|SBB
+WWUE|Winterthur Wülflingen|SBB
+WY|Wynigen|SBB
+WZ|Wetzikon ZH|SBB
+YND|Yvonand|SBB
+YV|Yverdon-les-Bains|SBB
+ZAE|Zäziwil|SBB
+ZAF|Zürich Affoltern|SBB
+ZAFA|Zürich Affoltern (Abzw)|SBB
+ZAS|Zürich Altstetten|SBB
+ZAU|Zürich Aussersihl (Abzw)|SBB
+ZAUB|Zürich Aubrugg (Vzw)|SBB
+ZB|Ziegelbrücke|SBB
+ZEN|Zürich Enge|SBB
+ZF|Zofingen|SBB
+ZFFR|Frauenfeld Zuckerrüben|SBB
+ZFH|Zürich Flughafen|SBB
+ZG|Zug|SBB
+ZGCA|Zug Casino|SBB
+ZGFR|Zug Fridbach|SBB
+ZGO|Zug Oberwil|SBB
+ZGPP|Zug Postplatz                                                      —        Basel Neuallschwil|SBB
+ZGRG|Zgraggen (Spw)                                                     —        Yverdon Y-Parc|SBB
+ZGSE|Zug Schutzengel|SBB
+ZGUB|Zürich Gubrist|SBB
+ZGV|Zürich HB Cargo GV|SBB
+ZHDB|Zürich Hardbrücke|SBB
+ZHDW|Zürich Hardbrücke West (Spw)|SBB
+ZHER|Zürich Herdern Abstellgruppe|SBB
+ZHOT|Zürich Hottingen (Spw)|SBB
+ZHW|Zürich Hauptwerkstätte|SBB
+ZIM|Zimeysa|SBB
+ZIZS|Zizers SBB|SBB
+ZK|Zollikon|SBB
+ZKOL|Zürich Kollerwiese (Spw)|SBB
+ZLEE|Zürich Lettentunnel Ende|SBB
+ZLET|Zürich Letten|SBB
+ZLOE|Zürich HB Löwenstrasse|SBB
+ZMUE|Zürich Mülligen|SBB
+ZMUS|Zürich HB Museumstrasse|SBB
+ZOER|Zürich Oerlikon|SBB
+ZOL|Zollikofen|SBB
+ZSEB|Zürich Seebach|SBB
+ZSTH|Zürich Stadelhofen|SBB
+ZTB|Zürich Tiefenbrunnen|SBB
+ZUE|Zürich HB|SBB
+ZUN|Zürich HB Nord|SBB
+ZVB|Zürich Vorbahnhof|SBB
+ZVIA|Zürich Viadukt (Abzw)|SBB
+ZWD|Zweidlen|SBB
+ZWG|Zwingen|SBB
+ZWIE|Zürich Wiedikon|SBB
+ZWIP|Zürich Wipkingen|SBB
+ZWOL|Zürich Wollishofen|SBB
+ZZ|Bad Zurzach|SBB
+AB|Ausserberg|BLS
+AEF|Aefligen|BLS
+BDFB|Burgdorf Buchmatt|BLS
+BDFS|Burgdorf Steinhof|BLS
+BH|Burgholz|BLS
+BIG|Biglen|BLS
+BIGE|Bigenthal|BLS
+BIST|Biberist Ost|BLS
+BK|Brenzikofen|BLS
+BNAH|Bern Europaplatz|BLS
+BNB|Bern Brünnen Westside|BLS
+BNBZ|Bern Bümpliz-Nord|BLS
+BNST|Bern Stöckacker|BLS
+BNWE|Bern Weissenbühl|BLS
+BOLT|Boltigen|BLS
+BP|Belp|BLS
+BPST|Belp-Steinbach|BLS
+BWA|Burgistein|BLS
+CORC|Corcelles|BLS
+CREM|Crémines|BLS
+DAE|Därligen|BLS
+DR|Därstetten|BLS
+EB|Eggerberg|BLS
+EBIS|Erlenbach i. S.|BLS
+EIF|Eifeld|BLS
+ENGE|Enge i. S.|BLS
+FR|Frutigen|BLS
+FS|Faulensee|BLS
+GAE|Gänsbrunnen|BLS
+GAS|Gasel|BLS
+GET|Gettnau|BLS
+GH|Grosshöchstetten|BLS
+GLF|Gerlafingen|BLS
+GMM|Gümmenen|BLS
+GN|Grenchen-Nord|BLS
+GO|Goppenstein|BLS
+GP|Gampelen|BLS
+GRMA|Grünenmatt|BLS
+GRU|Grubenwald|BLS
+GUBU|Gutenburg|BLS
+GVAL|Grandval|BLS
+HA|Hasle-Rüegsau|BLS
+HMB|Heimberg|BLS
+HT|Hohtenn|BLS
+HUE|Hüswil|BLS
+HWIL|Huttwil|BLS
+IMHO|Im Holz|BLS
+INS|Ins|BLS
+IO|Interlaken Ost|BLS
+IW|Interlaken West|BLS
+KA|Kandersteg|BLS
+KD|Kaufdorf|BLS
+KDI|Kleindietwil|BLS
+KIAL|Kirchberg-Alchenflüh|BLS
+KOE|Köniz|BLS
+KS|Kehrsatz|BLS
+KSN|Kehrsatz Nord|BLS
+LADO|Langendorf|BLS
+LAED|Lädeli|BLS
+LAT|Lattigen b. Spiez|BLS
+LBF|Liebefeld|BLS
+LH|Lanzenhäusern|BLS
+LHO|Lindenholz|BLS
+LL|Lalden|BLS
+LN|Langnau|BLS
+LOM|Lommiswil|BLS
+LOTZ|Lotzwil|BLS
+LSS|Leissigen|BLS
+LTHS|Langenthal Süd|BLS
+LUGO|Lützelflüh-Goldbach|BLS
+MADI|Madiswil|BLS
+MAU|Menznau|BLS
+MEP|Marin-Epagnier|BLS
+MHN|Mittelhäusern|BLS
+MM|Müntschemier|BLS
+MOOS|Moos|BLS
+MUE|Mülenen|BLS
+NS|Niederscherli|BLS
+OBB|Oberburg|BLS
+OD|Oberdiessbach|BLS
+ODF|Oberdorf SO|BLS
+OE|Oey-Diemtigen|BLS
+OIS|Oberwil i. S.|BLS
+RAM|Ramsei|BLS
+RBA|Rohrbach|BLS
+RCH|Bern Riedbach|BLS
+REIK|Reichenbach i. K.|BLS
+RGD|Ringoldingen|BLS
+ROSS|Rosshäusern|BLS
+SBLB|St-Blaise-Lac|BLS
+SBR|Schwarzwasserbrücke|BLS
+SCBG|Schwarzenburg|BLS
+SF|Seftigen|BLS
+SHIE|Schafhausen i.E.|BLS
+SP|Spiez|BLS
+STAL|Stalden i.E.|BLS
+STEF|Steffisburg|BLS
+SWB|Schwäbis|BLS
+SWG|Sumiswald-Grünen|BLS
+TH|Thun|BLS
+THU|Thurnen|BLS
+TO|Toffen|BLS
+UE|Uetendorf|BLS
+UEA|Uetendorf-Allmend|BLS
+UT|Utzenstorf|BLS
+WALK|Walkringen|BLS
+WBA|Weissenbach|BLS
+WBB|Wabern b.B.|BLS
+WG|Weissenburg|BLS
+WM|Wimmis|BLS
+WR|Wiler|BLS
+WSAU|Willisau|BLS
+ZBR|Zihlbrücke|BLS
+ZELL|Zell LU|BLS
+ZO|Zollbrück|BLS
+ZOO|Crémines-Zoo|BLS
+ZW|Zweisimmen|BLS`;
+
+const BP_LISTE = BP_ROH.split('\n').map(z=>{
+  const [abk,name,bahn]=z.split('|');
+  return { abk, name, bahn, quelle:'Amtlich' };
+});
+
+/* Lagen der wichtigsten Knoten — für alles Übrige wird die Koordinate
+   beim Übernehmen aus dem Haltestellenverzeichnis nachgeschlagen. */
+const BP_KOORD = {
+  AA:[47.3914,8.0512],
+  AB:[46.312,7.83],
+  AL:[46.879,8.642],
+  BD:[47.4763,8.3084],
+  BDF:[47.057,7.6203],
+  BEL:[46.1954,9.0296],
+  BG:[47.4808,8.2081],
+  BI:[47.1327,7.2436],
+  BIA:[46.36,8.97],
+  BN:[46.949,7.4396],
+  BR:[46.3195,7.988],
+  BS:[47.5474,7.5896],
+  CH:[46.8531,9.5289],
+  DMT:[47.3648,7.3494],
+  ER:[46.821,8.651],
+  FR:[46.588,7.651],
+  FRI:[46.8032,7.1512],
+  GD:[47.0501,8.5464],
+  GE:[46.2102,6.1424],
+  GO:[46.439,7.766],
+  GOE:[46.666,8.586],
+  GSS:[47.4155,9.253],
+  HT:[46.356,7.793],
+  IM:[47.087,8.462],
+  IO:[46.6906,7.869],
+  KA:[46.495,7.674],
+  KUE:[47.086,8.441],
+  LB:[47.3906,8.1735],
+  LG:[46.0053,8.947],
+  LS:[46.5169,6.6291],
+  LTH:[47.2148,7.7897],
+  LZ:[47.0502,8.3103],
+  MA:[46.101,7.0722],
+  NE:[46.9968,6.9364],
+  OL:[47.3519,7.9077],
+  PR:[47.521,7.693],
+  RH:[47.5657,9.3789],
+  RK:[47.1443,8.433],
+  SA:[47.0459,9.4453],
+  SG:[47.4231,9.3696],
+  SH:[47.6987,8.6329],
+  SIO:[46.2273,7.3272],
+  SIS:[47.464,7.811],
+  SO:[47.2019,7.5348],
+  SP:[46.6862,7.68],
+  TH:[46.7549,7.6294],
+  VI:[46.2938,7.8817],
+  W:[47.5003,8.7238],
+  WIL:[47.4634,9.045],
+  YV:[46.7645,6.6425],
+  ZAS:[47.3915,8.489],
+  ZB:[47.1359,9.0637],
+  ZG:[47.1739,8.5153],
+  ZOER:[47.4114,8.5442],
+  ZUE:[47.3779,8.5403]
+};
+
+const STAMM_BP = Object.keys(BP_KOORD).map(a=>{
+  const e=BP_LISTE.find(x=>x.abk===a);
+  return [a, e?e.name:a, BP_KOORD[a][0], BP_KOORD[a][1]];
+});
 
 /* ---------- Beispieldaten ----------
    Abkürzungen und Streckennummern nach der SBB-Übersicht
@@ -1942,7 +3168,10 @@ const STAMM_BP=[
 async function beispieldaten(){
   const bp=STAMM_BP;
   const neu=bp.filter(([abk])=>!S.punkte.some(p=>p.abk===abk))
-    .map(([abk,name,lat,lon])=>({abk,name,typ:'Bahnhof',bahn:'SBB',lat,lon}));
+    .map(([abk,name,lat,lon])=>{
+      const e=BP_LISTE.find(x=>x.abk===abk);
+      return {abk, name:e?e.name:name, typ:'Bahnhof', bahn:e?e.bahn:'SBB', lat, lon};
+    });
   if(neu.length){ const {error}=await db.from('betriebspunkt').insert(neu); if(error) return fehler(error); }
   const {data:alle}=await db.from('betriebspunkt').select('id,abk');
   const karte={}; (alle||[]).forEach(p=>karte[p.abk]=p.id);
@@ -1952,9 +3181,9 @@ async function beispieldaten(){
      Kartenebene "Schienennetz BAV" ablesen und nachtragen.            */
   const str=[
     ['',   '111','Genève – Lausanne','60',['GE','LS']],
-    ['',   '211','Lausanne – Sion','107',['LS','MG','SIO']],
+    ['',   '211','Lausanne – Sion','107',['LS','MA','SIO']],
     ['',   '221','Sion – Brig','48',['SIO','VI','BR']],
-    ['',   '222','Brig – Iselle (Simplon)','23',['BR','ISE']],
+    ['',   '222','Brig – Iselle (Simplon)','23',['BR']],
     ['',   '322','Thun – Spiez – Frutigen','22',['TH','SP','FR']],
     ['',   '351','Frutigen – Brig (Lötschberg-Bergstrecke)','52',['FR','BR']],
     ['',   '361','Spiez – Interlaken Ost','25',['SP','IO']],
@@ -1963,10 +3192,10 @@ async function beispieldaten(){
     ['',   '411','Basel SBB – Olten (Hauenstein-Basislinie)','39',['BS','PR','SIS','OL']],
     ['600','531','Luzern – Arth-Goldau – Göschenen','76',['LZ','GD','AL','GOE']],
     ['600','541','Göschenen – Bellinzona','86',['GOE','BEL']],
-    ['',   '602','Zürich HB – Winterthur','28',['ZUE','OGL','W']],
-    ['',   '711','Winterthur – St. Gallen','58',['W','WL','GSS','SG']],
-    ['',   '',   'Olten – Bern','62',['OL','LGUT','BDF','BN']],
-    ['',   '',   'Olten – Zürich HB','65',['OL','AA','BRGG','BAD','ZUE']],
+    ['',   '602','Zürich HB – Winterthur','28',['ZUE','ZOER','W']],
+    ['',   '711','Winterthur – St. Gallen','58',['W','WIL','GSS','SG']],
+    ['',   '',   'Olten – Bern','62',['OL','LTH','BDF','BN']],
+    ['',   '',   'Olten – Zürich HB','65',['OL','AA','BG','BD','ZUE']],
     ['',   '',   'Zürich HB – Chur','120',['ZUE','ZB','SA','CH']]
   ];
   for(const [linie,tabelle,name,km,codes] of str){
@@ -2047,17 +3276,19 @@ document.addEventListener('change',async ev=>{
   }
   if(wert.startsWith('neu:')){
     const abk=wert.slice(4);
-    const eintrag=STAMM_BP.find(x=>x[0]===abk);
+    const eintrag=BP_LISTE.find(x=>x.abk===abk);
     if(!eintrag) return;
-    meldung(eintrag[1]+' wird angelegt …');
+    meldung(eintrag.name+' wird angelegt …');
+    const k=BP_KOORD[abk];
     const {data,error}=await db.from('betriebspunkt').insert({
-      abk:eintrag[0], name:eintrag[1], typ:'Bahnhof', bahn:'SBB', lat:eintrag[2], lon:eintrag[3]
+      abk:eintrag.abk, name:eintrag.name, typ:'Bahnhof', bahn:eintrag.bahn,
+      lat:k?k[0]:null, lon:k?k[1]:null
     }).select().single();
     if(error){ fehler(error); return; }
     S.punkte.push(data);
     wert=data.id;
     const sel=$('f-bpwahl'); if(sel) sel.innerHTML=bpAuswahlHtml();
-    meldung(eintrag[1]+' angelegt und eingefügt');
+    meldung(eintrag.name+' angelegt und eingefügt');
   }
   ENTWURF.punkte.push(wert);
   zeichneBpWahl();
@@ -2085,6 +3316,7 @@ async function sitzungWechsel(session){
     /* Betriebspunktverzeichnis im Hintergrund aus der Datenbank holen */
     verzeichnisLaden().then(v=>{
       if(v) zeichnen();
+      else abkIndexLaden();      // schlanker Ersatz, bis das Verzeichnis steht
       verzeichnisPflegen();      // baut oder frischt auf, falls nötig
     });
   } else { S.user=null; S.profil=null; }
