@@ -686,9 +686,11 @@ function ansichtKarte(){
       <button class="btn haupt voll" data-tat="verlauf-alle">${gerade.length} Strecke(n) auf die Gleise legen</button>
     </div>
     <div class="fussnote" style="margin-top:8px">Strecken ohne eigenen Verlauf sind gestrichelt und laufen schnurgerade zwischen den Bahnhöfen. Der Knopf berechnet den echten Gleisverlauf aus OpenStreetMap; für alle Strecken zusammen dauert das einige Minuten.</div>`:''}
-  ${ohne?`<div class="aktionen" style="margin-top:12px">
-      <button class="btn voll" data-tat="koordinaten-suchen">${ohne} fehlende Koordinaten automatisch suchen</button>
-    </div>
+  <div class="aktionen" style="margin-top:12px">
+    ${ohne?`<button class="btn voll" data-tat="koordinaten-suchen">${ohne} fehlende Koordinaten holen</button>`:''}
+    <button class="btn voll" data-tat="koordinaten-pruefen">Lage aller Punkte amtlich prüfen</button>
+  </div>
+  ${ohne?`<div style="display:none"></div>
     <div class="fussnote" style="margin-top:8px">Gesucht wird bei den öV-Haltestellen und der Landestopografie, sonst bei OpenStreetMap. Was dort nicht zu finden ist — Anschlussgleise, Abstellanlagen —, setzt du im Modus «Punkt setzen» von Hand.</div>`:''}`;
 }
 
@@ -800,30 +802,48 @@ function ausAttrs(a){
 }
 
 async function geokodieren(p){
-  const text = encodeURIComponent(p.name||'');
+  const text=String(p.name||'').trim();
   if(!text) return null;
+  const soll=normName(text);
 
-  /* 1) Haltestellen des öffentlichen Verkehrs (BAV) */
+  /* Haltestellen des öffentlichen Verkehrs — amtlich und lagegenau */
   try{
-    const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=featuresearch&features=ch.bav.haltestellen-oev&sr=4326&limit=1&searchText=${text}`);
+    const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=featuresearch`
+      + `&features=ch.bav.haltestellen-oev&sr=4326&limit=10&searchText=${encodeURIComponent(text)}`);
     const j=await r.json();
-    const k=ausAttrs(j.results && j.results[0] && j.results[0].attrs);
-    if(k) return {...k, quelle:'öV-Haltestellen'};
+    const kandidaten=(j.results||[]).map(x=>x.attrs).filter(Boolean).map(a=>{
+      const k=ausAttrs(a); if(!k) return null;
+      const name=String(a.label||'').replace(/<[^>]*>/g,'').trim();
+      return name?{...k, name}:null;
+    }).filter(Boolean);
+
+    /* Reihenfolge: genau gleicher Name, dann Name mit Zusatz, sonst nichts */
+    const genau=kandidaten.find(x=>normName(x.name)===soll);
+    if(genau) return {lat:genau.lat, lon:genau.lon, quelle:'öV-Haltestellen', treffer:genau.name};
+    const teil=kandidaten.find(x=>{
+      const n=normName(x.name);
+      return n.startsWith(soll+' ') || soll.startsWith(n+' ') || n===soll.replace(/ (bahnhof|bhf)$/,'');
+    });
+    if(teil) return {lat:teil.lat, lon:teil.lon, quelle:'öV-Haltestellen', treffer:teil.name};
   }catch(e){}
 
-  /* 2) Ortsnamen der Landestopografie */
+  /* Betriebspunkte in OpenStreetMap — für Anlagen ohne Haltestelle */
   try{
-    const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=locations&sr=4326&limit=1&searchText=${text}`);
-    const j=await r.json();
-    const k=ausAttrs(j.results && j.results[0] && j.results[0].attrs);
-    if(k) return {...k, quelle:'swisstopo'};
-  }catch(e){}
-
-  /* 3) OpenStreetMap als Rückfallebene */
-  try{
-    const r=await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ch&q=${encodeURIComponent('Bahnhof '+(p.name||''))}`);
-    const j=await r.json();
-    if(j[0] && IN_CH(+j[0].lat,+j[0].lon)) return {lat:+j[0].lat, lon:+j[0].lon, quelle:'OpenStreetMap'};
+    const sicher=text.replace(/[\\^$.*+?()[\]{}|"]/g,'.');
+    const query=`[out:json][timeout:25];`
+      + `(node["railway"~"${BP_TYPEN}"]["name"~"^${sicher}$",i](45.75,5.80,47.95,10.70);`
+      + `way["railway"~"${BP_TYPEN}"]["name"~"^${sicher}$",i](45.75,5.80,47.95,10.70););`
+      + `out tags center 5;`;
+    for(const url of OVERPASS){
+      const r=await fetch(url,{ method:'POST', body:'data='+encodeURIComponent(query) });
+      if(!r.ok) continue;
+      const j=await r.json();
+      const liste=(j.elements||[]).map(bpAusElement).filter(Boolean);
+      const passend=liste.find(x=>normName(x.name)===soll) || liste[0];
+      if(passend && IN_CH(passend.lat,passend.lon))
+        return {lat:passend.lat, lon:passend.lon, quelle:'OpenStreetMap', treffer:passend.name};
+      break;
+    }
   }catch(e){}
 
   return null;
@@ -1182,9 +1202,8 @@ function ausVerzeichnis(q){
     const nn=normName(e.name);
     const passt = nn.includes(kl) || e.abk===kurz || e.abk.startsWith(kurz);
     if(!passt) return;
-    const k=BP_KOORD[e.abk];
     dazu({ abk:e.abk, name:e.name, typ:'Bahnhof', bahn:e.bahn,
-           lat:k?k[0]:null, lon:k?k[1]:null, quelle:e.bahn });
+           lat:null, lon:null, quelle:e.bahn });
   });
 
   /* 2) zusätzlich geladenes Verzeichnis (andere Bahnen) */
@@ -1703,6 +1722,23 @@ const TATEN = {
     const box=$('p-treffer'); if(box){ box.hidden=true; box.innerHTML=''; }
     const suche=$('p-suche'); if(suche) suche.value='';
     if(!e.dataset.abk) meldung('Abkürzung noch eintragen — im Verzeichnis nicht hinterlegt');
+  },
+  'koordinaten-pruefen': async ()=>{
+    if(!confirm('Die Lage aller Betriebspunkte aus dem amtlichen Haltestellenverzeichnis neu setzen? Von Hand gesetzte Punkte werden dabei überschrieben.')) return;
+    const offen=S.punkte.filter(p=>darfStamm(p));
+    let ok=0, fehl=0, i=0;
+    for(const p of offen){
+      i++; meldung(`Lage prüfen ${i} von ${offen.length}: ${p.name} …`);
+      const k=await geokodieren(p);
+      if(k){
+        const weit = hatKoord(p) ? Math.round(meterAbstand([p.lat,p.lon],[k.lat,k.lon])) : null;
+        const {error}=await db.from('betriebspunkt').update({lat:k.lat, lon:k.lon}).eq('id',p.id);
+        if(error) fehl++; else { ok++; if(weit!==null && weit>200) console.log(p.name, 'um', weit, 'm verschoben'); }
+      } else fehl++;
+      await new Promise(r=>setTimeout(r,320));
+    }
+    await alleLaden(); zeichnen();
+    meldung(`${ok} Lagen gesetzt${fehl?', '+fehl+' ohne Treffer':''}`, fehl>0);
   },
   'verzeichnis-erneuern': async ()=>{
     if(!confirm('Alle Betriebspunkte der Schweiz aus OpenStreetMap holen und in der Datenbank ablegen? Das dauert ein bis zwei Minuten.')) return;
@@ -3102,69 +3138,18 @@ const BP_LISTE = BP_ROH.split('\n').map(z=>{
   return { abk, name, bahn, quelle:'Amtlich' };
 });
 
-/* Lagen der wichtigsten Knoten — für alles Übrige wird die Koordinate
-   beim Übernehmen aus dem Haltestellenverzeichnis nachgeschlagen. */
-const BP_KOORD = {
-  AA:[47.3914,8.0512],
-  AB:[46.312,7.83],
-  AL:[46.879,8.642],
-  BD:[47.4763,8.3084],
-  BDF:[47.057,7.6203],
-  BEL:[46.1954,9.0296],
-  BG:[47.4808,8.2081],
-  BI:[47.1327,7.2436],
-  BIA:[46.36,8.97],
-  BN:[46.949,7.4396],
-  BR:[46.3195,7.988],
-  BS:[47.5474,7.5896],
-  CH:[46.8531,9.5289],
-  DMT:[47.3648,7.3494],
-  ER:[46.821,8.651],
-  FR:[46.588,7.651],
-  FRI:[46.8032,7.1512],
-  GD:[47.0501,8.5464],
-  GE:[46.2102,6.1424],
-  GO:[46.439,7.766],
-  GOE:[46.666,8.586],
-  GSS:[47.4155,9.253],
-  HT:[46.356,7.793],
-  IM:[47.087,8.462],
-  IO:[46.6906,7.869],
-  KA:[46.495,7.674],
-  KUE:[47.086,8.441],
-  LB:[47.3906,8.1735],
-  LG:[46.0053,8.947],
-  LS:[46.5169,6.6291],
-  LTH:[47.2148,7.7897],
-  LZ:[47.0502,8.3103],
-  MA:[46.101,7.0722],
-  NE:[46.9968,6.9364],
-  OL:[47.3519,7.9077],
-  PR:[47.521,7.693],
-  RH:[47.5657,9.3789],
-  RK:[47.1443,8.433],
-  SA:[47.0459,9.4453],
-  SG:[47.4231,9.3696],
-  SH:[47.6987,8.6329],
-  SIO:[46.2273,7.3272],
-  SIS:[47.464,7.811],
-  SO:[47.2019,7.5348],
-  SP:[46.6862,7.68],
-  TH:[46.7549,7.6294],
-  VI:[46.2938,7.8817],
-  W:[47.5003,8.7238],
-  WIL:[47.4634,9.045],
-  YV:[46.7645,6.6425],
-  ZAS:[47.3915,8.489],
-  ZB:[47.1359,9.0637],
-  ZG:[47.1739,8.5153],
-  ZOER:[47.4114,8.5442],
-  ZUE:[47.3779,8.5403]
-};
-
-const STAMM_BP = Object.keys(BP_KOORD).map(a=>{
+/* Keine fest hinterlegten Koordinaten: Die Lage wird immer aus dem
+   amtlichen Haltestellenverzeichnis des Bundesamts für Verkehr geholt.
+   Geschätzte Werte führten zu Punkten neben dem Gleis.              */
+const BP_KOORD = {};
+const STAMM_BP = [
+  'BS','PR','SIS','OL','AA','LB','BG','BD','ZAS','ZUE','ZOER','W','WIL','GSS','SG','SH','RH',
+  'ZG','RK','LZ','GD','IM','KUE','AL','ER','GOE','BEL','BIA','LG','CH','SA','ZB','BN','BDF',
+  'LTH','SO','TH','SP','FR','KA','GO','HT','AB','IO','VI','BR','FRI','LS','GE','MA','SIO',
+  'BI','NE','DMT','YV'
+].map(a=>{
   const e=BP_LISTE.find(x=>x.abk===a);
-  return [a, e?e.name:a, BP_KOORD[a][0], BP_KOORD[a][1]];
+  return [a, e?e.name:a, null, null];
 });
 
 /* ---------- Beispieldaten ----------
@@ -3174,9 +3159,9 @@ const STAMM_BP = Object.keys(BP_KOORD).map(a=>{
 async function beispieldaten(){
   const bp=STAMM_BP;
   const neu=bp.filter(([abk])=>!S.punkte.some(p=>p.abk===abk))
-    .map(([abk,name,lat,lon])=>{
+    .map(([abk,name])=>{
       const e=BP_LISTE.find(x=>x.abk===abk);
-      return {abk, name:e?e.name:name, typ:'Bahnhof', bahn:e?e.bahn:'SBB', lat, lon};
+      return {abk, name:e?e.name:name, typ:'Bahnhof', bahn:e?e.bahn:'SBB', lat:null, lon:null};
     });
   if(neu.length){ const {error}=await db.from('betriebspunkt').insert(neu); if(error) return fehler(error); }
   const {data:alle}=await db.from('betriebspunkt').select('id,abk');
@@ -3210,6 +3195,9 @@ async function beispieldaten(){
     if(error){ fehler(error); continue; }
     await db.from('strecke_punkt').insert(codes.map((c,i)=>({strecke_id:data.id,punkt_id:karte[c],reihenfolge:i})));
   }
+  await alleLaden();
+  meldung('Beispieldaten geladen — Koordinaten werden geholt …');
+  await koordinatenNachziehen(S.punkte.filter(p=>!hatKoord(p)).map(p=>p.id));
   meldung('Beispieldaten geladen — BAV-Nummern nachtragen');
 }
 
@@ -3285,10 +3273,9 @@ document.addEventListener('change',async ev=>{
     const eintrag=BP_LISTE.find(x=>x.abk===abk);
     if(!eintrag) return;
     meldung(eintrag.name+' wird angelegt …');
-    const k=BP_KOORD[abk];
     const {data,error}=await db.from('betriebspunkt').insert({
       abk:eintrag.abk, name:eintrag.name, typ:'Bahnhof', bahn:eintrag.bahn,
-      lat:k?k[0]:null, lon:k?k[1]:null
+      lat:null, lon:null
     }).select().single();
     if(error){ fehler(error); return; }
     S.punkte.push(data);
