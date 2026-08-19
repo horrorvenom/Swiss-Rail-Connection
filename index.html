@@ -495,6 +495,9 @@ function ansichtAnlagen(){
   return `<input class="suche" id="suchfeld" placeholder="Anlage, Abkürzung oder Typ suchen" value="${esc(SUCHE)}">
   ${chips()}
   <button class="btn haupt voll" data-tat="punkt-neu" style="margin-bottom:12px">Anlage erfassen</button>
+  ${VERZEICHNIS
+    ? `<div class="fussnote" style="margin:-4px 0 12px">Verzeichnis geladen — ${VERZEICHNIS.length} Betriebspunkte der ganzen Schweiz durchsuchbar${istAdmin()?'. <b>Aktualisieren unter Konto.</b>':'.'}</div>`
+    : `<button class="btn voll" data-tat="verzeichnis-laden" style="margin-bottom:12px">Betriebspunktverzeichnis laden</button>`}
   ${liste.length?liste.map(anlageKarte).join(''):`<div class="leer"><b>Keine Treffer</b>Anlagen sind Bahnhöfe, Rangierbahnhöfe, Anschlussgleise und Abstellanlagen.</div>`}`;
 }
 
@@ -1025,43 +1028,136 @@ function bahnKuerzen(op){
 const OSM_TYP={station:'Bahnhof', halt:'Haltestelle', junction:'Abzweigung',
   service_station:'Dienststation', yard:'Abstellanlage'};
 
-/* ---------- Suche: eigenes Verzeichnis, amtliche Haltestellen, OpenStreetMap ---------- */
+/* ============================================================
+   Betriebspunktverzeichnis — einmal komplett laden, dann sofort suchen
+   ============================================================ */
+const OVERPASS=['https://overpass-api.de/api/interpreter',
+                'https://overpass.kumi.systems/api/interpreter'];
+let VERZEICHNIS=null, VERZ_LAEUFT=null, VERZ_FEHLER='';
 let SUCHLAUF=null, SUCH_ABBRUCH=null;
-const SUCH_SPEICHER=new Map();
 
-async function osmBetriebspunkte(q, signal){
-  if(SUCH_SPEICHER.has(q)) return SUCH_SPEICHER.get(q);
-  const sicher=q.replace(/[\\^$.*+?()[\]{}|"]/g,'.');
-  const kasten='45.75,5.80,47.95,10.70';
-  const typen='^(station|halt|junction|service_station|yard)$';
-  const query=`[out:json][timeout:30];`
-    + `(node["railway"~"${typen}"]["name"~"${sicher}",i](${kasten});`
-    + `way["railway"~"${typen}"]["name"~"${sicher}",i](${kasten}););`
-    + `out tags center 40;`;
-  const server=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
-  let letzter='';
-  for(const url of server){
+/* Kacheln, damit die Abfrage nicht in den Zeitablauf läuft */
+const KACHELN=[
+  [45.75,5.80,46.60,7.40],[45.75,7.40,46.60,9.10],[45.75,9.10,46.60,10.70],
+  [46.60,5.80,47.30,7.40],[46.60,7.40,47.30,9.10],[46.60,9.10,47.30,10.70],
+  [47.30,5.80,47.95,7.40],[47.30,7.40,47.95,9.10],[47.30,9.10,47.95,10.70]
+];
+const BP_TYPEN='^(station|halt|stop|junction|service_station|yard|crossover|spur_junction|site)$';
+
+function bpAusElement(e){
+  const t=e.tags||{};
+  const lat=e.lat!=null?e.lat:(e.center&&e.center.lat);
+  const lon=e.lon!=null?e.lon:(e.center&&e.center.lon);
+  if(lat==null||lon==null) return null;
+  const abk=String(t['railway:ref']||t['ref:railway']||t.ref||'').trim();
+  const name=String(t.name||t['name:de']||'').trim();
+  if(!abk && !name) return null;                 // ohne beides unbrauchbar
+  return { abk, name: name||abk, typ:OSM_TYP[t.railway]||'Bahnhof',
+           bahn:bahnKuerzen(t.operator||t.network), lat:+lat, lon:+lon, quelle:'Verzeichnis' };
+}
+
+async function overpassKachel(box, signal){
+  const [s,w,n,e]=box;
+  const query=`[out:json][timeout:120];`
+    + `(node["railway"~"${BP_TYPEN}"](${s},${w},${n},${e});`
+    + `way["railway"~"${BP_TYPEN}"](${s},${w},${n},${e}););`
+    + `out tags center;`;
+  for(const url of OVERPASS){
     try{
       const r=await fetch(url,{ method:'POST', body:'data='+encodeURIComponent(query), signal });
-      if(!r.ok){ letzter = r.status===429 ? 'Gleisdatenserver gerade überlastet' : 'Antwort '+r.status; continue; }
+      if(!r.ok){ VERZ_FEHLER = r.status===429?'Server überlastet':'Antwort '+r.status; continue; }
       const j=await r.json();
-      const raus=(j.elements||[]).map(e=>{
-        const t=e.tags||{};
-        const lat=e.lat!=null?e.lat:(e.center&&e.center.lat);
-        const lon=e.lon!=null?e.lon:(e.center&&e.center.lon);
-        if(lat==null||lon==null||!t.name) return null;
-        return { abk:String(t['railway:ref']||t.ref||'').trim(), name:String(t.name).trim(),
-                 typ:OSM_TYP[t.railway]||'Bahnhof', bahn:bahnKuerzen(t.operator),
-                 lat:+lat, lon:+lon, quelle:'OpenStreetMap' };
-      }).filter(Boolean);
-      SUCH_SPEICHER.set(q, raus);
-      return raus;
-    }catch(e){
-      if(e.name==='AbortError') throw e;
-      letzter='nicht erreichbar';
+      return (j.elements||[]).map(bpAusElement).filter(Boolean);
+    }catch(err){
+      if(err.name==='AbortError') throw err;
+      VERZ_FEHLER='Server nicht erreichbar';
     }
   }
-  const leer=[]; leer.hinweis=letzter; return leer;
+  return null;
+}
+
+function verzeichnisZusammenfuehren(roh){
+  const karte=new Map();
+  roh.forEach(x=>{
+    const k=(x.abk?'A:'+x.abk.toLowerCase():'N:'+x.name.toLowerCase())
+          +'|'+Math.round(x.lat*120)+'|'+Math.round(x.lon*120);
+    const alt=karte.get(k);
+    if(!alt){ karte.set(k,x); return; }
+    if(!alt.abk && x.abk) karte.set(k,x);
+    else if(!alt.bahn && x.bahn) alt.bahn=x.bahn;
+  });
+  return [...karte.values()].sort((a,b)=>a.name.localeCompare(b.name,'de'));
+}
+
+/* 1) aus der Datenbank — sofort und für alle gleich
+   2) sonst aus OpenStreetMap, kachelweise                */
+function verzeichnisLaden(ausOsm){
+  if(VERZEICHNIS && !ausOsm) return Promise.resolve(VERZEICHNIS);
+  if(VERZ_LAEUFT) return VERZ_LAEUFT;
+
+  VERZ_LAEUFT=(async()=>{
+    if(!ausOsm){
+      try{
+        const {data,error}=await db.from('verzeichnis').select('abk,name,typ,bahn,lat,lon');
+        if(!error && data && data.length){
+          VERZEICHNIS=data.map(x=>({...x, quelle:'Verzeichnis'}));
+          VERZ_LAEUFT=null; VERZ_FEHLER='';
+          return VERZEICHNIS;
+        }
+      }catch(e){ /* dann eben aus OpenStreetMap */ }
+    }
+    const roh=[];
+    for(let i=0;i<KACHELN.length;i++){
+      meldung(`Betriebspunkte laden — Gebiet ${i+1} von ${KACHELN.length} …`);
+      const teil=await overpassKachel(KACHELN[i]);
+      if(teil) roh.push(...teil);
+      if(i<KACHELN.length-1) await new Promise(r=>setTimeout(r,900));
+    }
+    VERZ_LAEUFT=null;
+    if(!roh.length) return null;
+    VERZEICHNIS=verzeichnisZusammenfuehren(roh);
+    VERZ_FEHLER='';
+    return VERZEICHNIS;
+  })();
+  return VERZ_LAEUFT;
+}
+
+/* Administratoren legen das Verzeichnis in der Datenbank ab —
+   danach steht es allen sofort zur Verfügung. */
+async function verzeichnisSichern(){
+  if(!VERZEICHNIS || !VERZEICHNIS.length) return false;
+  const {error:weg}=await db.from('verzeichnis').delete().neq('name','');
+  if(weg){ fehler(weg); return false; }
+  const zeilen=VERZEICHNIS.map(x=>({abk:x.abk||'', name:x.name, typ:x.typ||'Bahnhof',
+    bahn:x.bahn||'', lat:x.lat, lon:x.lon}));
+  for(let i=0;i<zeilen.length;i+=500){
+    meldung(`Verzeichnis sichern — ${Math.min(i+500,zeilen.length)} von ${zeilen.length} …`);
+    const {error}=await db.from('verzeichnis').insert(zeilen.slice(i,i+500));
+    if(error){ fehler(error); return false; }
+  }
+  return true;
+}
+
+function ausVerzeichnis(q){
+  const kl=q.toLowerCase();
+  const treffer=[];
+  const dazu=x=>{
+    if(!x||!x.name) return;
+    if(treffer.some(y=>y.name.toLowerCase()===x.name.toLowerCase() && (y.abk||'')===(x.abk||''))) return;
+    treffer.push(x);
+  };
+  STAMM_BP.filter(([a,n])=>n.toLowerCase().includes(kl)||a.toLowerCase().startsWith(kl))
+    .forEach(([abk,name,lat,lon])=>dazu({abk,name,lat,lon,typ:'Bahnhof',bahn:'SBB',quelle:'Stammliste'}));
+  if(VERZEICHNIS){
+    VERZEICHNIS
+      .filter(x=>x.name.toLowerCase().includes(kl) || (x.abk && x.abk.toLowerCase().startsWith(kl)))
+      .sort((a,b)=>{
+        const ax=a.name.toLowerCase().startsWith(kl)?0:1, bx=b.name.toLowerCase().startsWith(kl)?0:1;
+        return (b.abk?0:1)-(a.abk?0:1) || ax-bx || a.name.localeCompare(b.name,'de');
+      })
+      .slice(0,40).forEach(dazu);
+  }
+  return treffer;
 }
 
 async function bpSuchen(q){
@@ -1071,52 +1167,34 @@ async function bpSuchen(q){
   const ctrl=new AbortController();
   SUCH_ABBRUCH=ctrl;
 
-  const kl=q.toLowerCase();
-  const treffer=[];
-  const dazu=x=>{
-    if(!x || !x.name) return;
-    if(treffer.some(y=>y.name.toLowerCase()===x.name.toLowerCase() && (y.abk||'')===(x.abk||''))) return;
-    treffer.push(x);
-  };
+  let treffer=ausVerzeichnis(q);
+  if(!VERZEICHNIS){
+    trefferZeigen(treffer, 'Betriebspunktverzeichnis wird geladen — beim ersten Mal bis zu einer Minute …');
+    await verzeichnisLaden();
+    if(ctrl.signal.aborted) return;
+    treffer=ausVerzeichnis(q);
+  }
+  trefferZeigen(treffer);
 
-  /* 1) eigenes Verzeichnis — sofort */
-  STAMM_BP.filter(([a,n])=>n.toLowerCase().includes(kl)||a.toLowerCase().startsWith(kl))
-    .slice(0,8)
-    .forEach(([abk,name,lat,lon])=>dazu({abk,name,lat,lon,typ:'Bahnhof',bahn:'SBB',quelle:'Verzeichnis'}));
-  trefferZeigen(treffer, 'Suche in den amtlichen Verzeichnissen …');
+  if(treffer.length<5){
+    try{
+      const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=featuresearch`
+        + `&features=ch.bav.haltestellen-oev&sr=4326&limit=12&searchText=${encodeURIComponent(q)}`,
+        { signal: ctrl.signal });
+      const j=await r.json();
+      (j.results||[]).map(x=>x.attrs).filter(Boolean).forEach(a=>{
+        const k=ausAttrs(a); if(!k) return;
+        const name=String(a.label||'').replace(/<[^>]*>/g,'').trim();
+        if(!name) return;
+        if(treffer.some(t=>t.name.toLowerCase()===name.toLowerCase())) return;
+        treffer.push({ abk:'', name, typ:'Bahnhof', bahn:'', lat:k.lat, lon:k.lon, quelle:'öV-Haltestellen' });
+      });
+    }catch(e){ if(e.name==='AbortError') return; }
+    if(ctrl.signal.aborted) return;
+  }
 
-  /* 2) amtliche öV-Haltestellen — schnell, alle Bahnen, ohne Abkürzung */
-  try{
-    const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=featuresearch`
-      + `&features=ch.bav.haltestellen-oev&sr=4326&limit=15&searchText=${encodeURIComponent(q)}`,
-      { signal: ctrl.signal });
-    const j=await r.json();
-    (j.results||[]).map(x=>x.attrs).filter(Boolean).forEach(a=>{
-      const k=ausAttrs(a); if(!k) return;
-      const name=String(a.label||'').replace(/<[^>]*>/g,'').trim();
-      dazu({ abk:'', name, typ:'Bahnhof', bahn:'', lat:k.lat, lon:k.lon, quelle:'öV-Haltestellen' });
-    });
-  }catch(e){ if(e.name==='AbortError') return; }
-  if(ctrl.signal.aborted) return;
-  trefferZeigen(treffer, 'Suche Abkürzungen …');
-
-  /* 3) OpenStreetMap — liefert die Abkürzungen, dauert am längsten */
-  let osm=[];
-  try{ osm=await osmBetriebspunkte(q, ctrl.signal); }
-  catch(e){ if(e.name==='AbortError') return; }
-  if(ctrl.signal.aborted) return;
-
-  /* Abkürzung aus OSM in bereits gefundene Einträge übernehmen */
-  osm.forEach(o=>{
-    const vorhanden=treffer.find(t=>!t.abk && t.name.toLowerCase()===o.name.toLowerCase());
-    if(vorhanden && o.abk){ vorhanden.abk=o.abk; vorhanden.bahn=vorhanden.bahn||o.bahn;
-      vorhanden.typ=o.typ||vorhanden.typ; vorhanden.quelle='öV + OSM'; }
-  });
-  osm.sort((a,b)=>(b.abk?1:0)-(a.abk?1:0) || a.name.localeCompare(b.name,'de')).forEach(dazu);
-  treffer.sort((a,b)=>(b.abk?1:0)-(a.abk?1:0));
-
-  if(treffer.length) trefferZeigen(treffer.slice(0,25));
-  else trefferZeigen([], 'Nichts gefunden'+(osm.hinweis?' — '+osm.hinweis:'')+'. Felder von Hand ausfüllen.');
+  if(treffer.length) trefferZeigen(treffer.slice(0,30));
+  else trefferZeigen([], 'Nichts gefunden'+(VERZ_FEHLER?' — Verzeichnis '+VERZ_FEHLER:'')+'. Felder von Hand ausfüllen.');
 }
 
 
@@ -1158,6 +1236,17 @@ function ansichtKonto(){
         <span class="m">${FUNKTION[fkt(u)]}${u.rolle==='admin'?' · Administrator':''}${u.depot?' · '+esc(u.depot):''}</span></span>
         ${u.id!==S.user.id?`<button class="btn klein" data-tat="rolle-tauschen" data-id="${u.id}" data-wert="${u.rolle==='admin'?'lokfuehrer':'admin'}">${u.rolle==='admin'?'Rechte entziehen':'Zum Admin'}</button>`:'<span class="rollenschild">DU</span>'}
       </div>`).join('')}</div></div>
+  <div class="abschnitt"><h2>Betriebspunktverzeichnis</h2>
+    <div class="karte">
+      <div class="hinweis" style="margin:0 0 10px">
+        ${VERZEICHNIS?`Zurzeit ${VERZEICHNIS.length} Betriebspunkte geladen.`:'Noch nicht geladen.'}
+        Holt alle Bahnhöfe, Haltestellen, Abzweigungen, Anschlussgleise und Abstellanlagen der Schweiz
+        aus OpenStreetMap — sämtliche Bahnen — und legt sie in der Datenbank ab. Danach steht das
+        Verzeichnis allen Mitarbeitenden sofort zur Verfügung. Der Abruf dauert ein bis zwei Minuten.</div>
+      <button class="btn haupt voll" data-tat="verzeichnis-erneuern" style="margin-bottom:8px">Verzeichnis aus OpenStreetMap holen und sichern</button>
+      <button class="btn voll" data-tat="verzeichnis-laden">Nur laden, ohne zu sichern</button>
+    </div></div>
+
   <div class="abschnitt"><h2>Stammdaten</h2>
     <div class="karte">
       <div class="hinweis" style="margin:0 0 10px">Lädt 36 Betriebspunkte und 8 Hauptstrecken als Startgerüst. <b>Die Abkürzungen sind Beispielwerte und vor dem produktiven Einsatz gegen die offizielle Betriebspunktliste zu prüfen.</b></div>
@@ -1277,6 +1366,7 @@ function zeichneBpWahl(){
 }
 
 function formularPunkt(id){
+  verzeichnisLaden();          // im Hintergrund, blockiert nicht
   const p=id?punkt(id):null;
   ENTWURF=p?{...p}:{id:null,abk:'',name:'',typ:'Bahnhof',bahn:'',notiz:''};
   const typen=['Bahnhof','Rangierbahnhof','Haltestelle','Abzweigung','Anschlussgleis','Abstellanlage','Betriebsausweichstelle','Dienststation','Depot / Werkstätte','Grenzpunkt','Tunnelportal'];
@@ -1528,6 +1618,21 @@ const TATEN = {
     const box=$('p-treffer'); if(box){ box.hidden=true; box.innerHTML=''; }
     const suche=$('p-suche'); if(suche) suche.value='';
     if(!e.dataset.abk) meldung('Abkürzung noch eintragen — im Verzeichnis nicht hinterlegt');
+  },
+  'verzeichnis-laden': async ()=>{
+    meldung('Betriebspunktverzeichnis wird geladen …');
+    const v=await verzeichnisLaden();
+    zeichnen();
+    meldung(v?`${v.length} Betriebspunkte geladen`:'Verzeichnis '+(VERZ_FEHLER||'nicht erreichbar'), !v);
+  },
+  'verzeichnis-erneuern': async ()=>{
+    if(!confirm('Alle Betriebspunkte der Schweiz aus OpenStreetMap holen und in der Datenbank ablegen? Das dauert ein bis zwei Minuten.')) return;
+    VERZEICHNIS=null;
+    const v=await verzeichnisLaden(true);
+    if(!v){ meldung('Verzeichnis '+(VERZ_FEHLER||'nicht erreichbar'), true); zeichnen(); return; }
+    const ok=await verzeichnisSichern();
+    zeichnen();
+    meldung(ok?`${v.length} Betriebspunkte geladen und gesichert`:`${v.length} geladen, Sichern fehlgeschlagen`, !ok);
   },
   'punkt-neu': ()=>formularPunkt(null),
   'punkt-bearbeiten': e=>formularPunkt(e.dataset.id),
@@ -1789,7 +1894,7 @@ document.addEventListener('input',ev=>{
   if(ev.target.id==='p-suche'){
     clearTimeout(SUCHLAUF);
     const wert=ev.target.value;
-    SUCHLAUF=setTimeout(()=>bpSuchen(wert), 650);
+    SUCHLAUF=setTimeout(()=>bpSuchen(wert), 200);
   }
 });
 document.addEventListener('change',async ev=>{
@@ -1838,6 +1943,7 @@ async function sitzungWechsel(session){
       S.profil=neu;
     } else S.profil=data;
     await alleLaden();
+    verzeichnisLaden();          // aus der Datenbank, im Hintergrund
     ANSICHT='uebersicht';
   } else { S.user=null; S.profil=null; }
   zeichnen();
