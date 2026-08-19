@@ -497,7 +497,9 @@ function ansichtAnlagen(){
   <button class="btn haupt voll" data-tat="punkt-neu" style="margin-bottom:12px">Anlage erfassen</button>
   ${VERZEICHNIS
     ? `<div class="fussnote" style="margin:-4px 0 12px">Verzeichnis geladen — ${VERZEICHNIS.length} Betriebspunkte der ganzen Schweiz durchsuchbar${istAdmin()?'. <b>Aktualisieren unter Konto.</b>':'.'}</div>`
-    : `<button class="btn voll" data-tat="verzeichnis-laden" style="margin-bottom:12px">Betriebspunktverzeichnis laden</button>`}
+    : `<div class="hinweisbalken">Betriebspunktverzeichnis ${esc(VERZ_FEHLER||'wird vorbereitet')}.
+        ${istAdmin()?'Der Aufbau läuft im Hintergrund, sobald ein Administrator angemeldet ist — die Suche greift solange auf das amtliche Haltestellenverzeichnis zurück.'
+                    :'Die Suche greift solange auf das amtliche Haltestellenverzeichnis zurück.'}</div>`}
   ${liste.length?liste.map(anlageKarte).join(''):`<div class="leer"><b>Keine Treffer</b>Anlagen sind Bahnhöfe, Rangierbahnhöfe, Anschlussgleise und Abstellanlagen.</div>`}`;
 }
 
@@ -1097,14 +1099,32 @@ function verzeichnisLaden(ausOsm){
 
   VERZ_LAEUFT=(async()=>{
     if(!ausOsm){
+      /* Aus der Datenbank — schnell. Supabase liefert je Abfrage höchstens
+         1000 Zeilen, deshalb blockweise holen. */
       try{
-        const {data,error}=await db.from('verzeichnis').select('abk,name,typ,bahn,lat,lon');
-        if(!error && data && data.length){
-          VERZEICHNIS=data.map(x=>({...x, quelle:'Verzeichnis'}));
-          VERZ_LAEUFT=null; VERZ_FEHLER='';
+        const alle=[];
+        for(let von=0; ; von+=1000){
+          const {data,error}=await db.from('verzeichnis')
+            .select('abk,name,typ,bahn,lat,lon')
+            .order('name').range(von, von+999);
+          if(error) throw error;
+          if(!data || !data.length) break;
+          alle.push(...data);
+          if(data.length<1000) break;
+        }
+        VERZ_LAEUFT=null;
+        if(alle.length){
+          VERZEICHNIS=alle.map(x=>({...x, quelle:'Verzeichnis'}));
+          VERZ_FEHLER='';
           return VERZEICHNIS;
         }
-      }catch(e){ /* dann eben aus OpenStreetMap */ }
+        VERZ_FEHLER='noch nicht gefüllt';
+        return null;              // kein langsamer Rückfall beim Start
+      }catch(e){
+        VERZ_LAEUFT=null;
+        VERZ_FEHLER='Tabelle fehlt oder nicht lesbar';
+        return null;
+      }
     }
     const roh=[];
     for(let i=0;i<KACHELN.length;i+=3){
@@ -1131,9 +1151,9 @@ async function verzeichnisSichern(){
   if(weg){ fehler(weg); return false; }
   const zeilen=VERZEICHNIS.map(x=>({abk:x.abk||'', name:x.name, typ:x.typ||'Bahnhof',
     bahn:x.bahn||'', lat:x.lat, lon:x.lon}));
-  for(let i=0;i<zeilen.length;i+=500){
-    meldung(`Verzeichnis sichern — ${Math.min(i+500,zeilen.length)} von ${zeilen.length} …`);
-    const {error}=await db.from('verzeichnis').insert(zeilen.slice(i,i+500));
+  for(let i=0;i<zeilen.length;i+=800){
+    meldung(`Verzeichnis sichern — ${Math.min(i+800,zeilen.length)} von ${zeilen.length} …`);
+    const {error}=await db.from('verzeichnis').insert(zeilen.slice(i,i+800));
     if(error){ fehler(error); return false; }
   }
   return true;
@@ -1233,6 +1253,44 @@ async function abkuerzungenNachtragen(liste, signal){
   return geaendert;
 }
 
+/* ---------- Selbstpflege ----------
+   Ein Administrator, der sich anmeldet, baut das Verzeichnis im
+   Hintergrund auf, wenn es fehlt oder älter als 90 Tage ist.
+   Lokführer warten nie darauf.                                    */
+let PFLEGE_GELAUFEN=false;
+
+async function verzeichnisPflegen(){
+  if(PFLEGE_GELAUFEN || !istAdmin()) return;
+  PFLEGE_GELAUFEN=true;
+
+  let leer=true, alt=false;
+  try{
+    const {data,error}=await db.from('verzeichnis')
+      .select('aktualisiert').order('aktualisiert',{ascending:false}).limit(1);
+    if(error){
+      meldung('Verzeichnistabelle fehlt — SQL für "verzeichnis" noch ausführen', true);
+      return;
+    }
+    if(data && data.length){
+      leer=false;
+      const tage=(Date.now()-new Date(data[0].aktualisiert).getTime())/86400000;
+      alt = tage>90;
+    }
+  }catch(e){ return; }
+
+  if(!leer && !alt) return;
+
+  meldung(leer?'Betriebspunktverzeichnis wird aufgebaut — das läuft im Hintergrund …'
+              :'Betriebspunktverzeichnis wird aufgefrischt …');
+  VERZEICHNIS=null;
+  const v=await verzeichnisLaden(true);
+  if(!v){ meldung('Verzeichnis '+(VERZ_FEHLER||'nicht erreichbar')+' — später erneut versuchen', true); return; }
+  const ok=await verzeichnisSichern();
+  zeichnen();
+  meldung(ok?`${v.length} Betriebspunkte bereit — für alle Mitarbeitenden`
+            :`${v.length} geladen, Sichern fehlgeschlagen`, !ok);
+}
+
 async function bpSuchen(q){
   q=q.trim();
   if(q.length<2){ trefferZeigen([]); return; }
@@ -1243,7 +1301,9 @@ async function bpSuchen(q){
   let treffer=entdoppeln(ausVerzeichnis(q));
   trefferZeigen(treffer, treffer.length?'':'Suche …');
 
-  /* Amtliches Haltestellenverzeichnis — kennt jeden Bahnhof, ohne Abkürzung */
+  /* Amtliches Haltestellenverzeichnis — nur nötig, solange das
+     Betriebspunktverzeichnis fehlt oder wenig gefunden wurde */
+  if(VERZEICHNIS && treffer.length>=5){ trefferZeigen(treffer.slice(0,25)); return; }
   try{
     const r=await fetch(`https://api3.geo.admin.ch/rest/services/api/SearchServer?type=featuresearch`
       + `&features=ch.bav.haltestellen-oev&sr=4326&limit=15&searchText=${encodeURIComponent(q)}`,
@@ -1271,7 +1331,8 @@ async function bpSuchen(q){
   trefferZeigen(treffer.slice(0,25), 'Abkürzungen werden ergänzt …');
 
   try{
-    const geaendert=await abkuerzungenNachtragen(treffer, ctrl.signal);
+    /* Steht das Verzeichnis, sind die Abkürzungen schon dabei */
+    const geaendert=VERZEICHNIS ? false : await abkuerzungenNachtragen(treffer, ctrl.signal);
     if(ctrl.signal.aborted) return;
     if(geaendert) treffer=entdoppeln(treffer);
   }catch(e){ if(e.name==='AbortError') return; }
@@ -1323,11 +1384,11 @@ function ansichtKonto(){
     <div class="karte">
       <div class="hinweis" style="margin:0 0 10px">
         ${VERZEICHNIS?`Zurzeit ${VERZEICHNIS.length} Betriebspunkte geladen.`:'Noch nicht geladen.'}
-        Holt alle Bahnhöfe, Haltestellen, Abzweigungen, Anschlussgleise und Abstellanlagen der Schweiz
-        aus OpenStreetMap — sämtliche Bahnen — und legt sie in der Datenbank ab. Danach steht das
-        Verzeichnis allen Mitarbeitenden sofort zur Verfügung. Der Abruf dauert ein bis zwei Minuten.</div>
-      <button class="btn haupt voll" data-tat="verzeichnis-erneuern" style="margin-bottom:8px">Verzeichnis aus OpenStreetMap holen und sichern</button>
-      <button class="btn voll" data-tat="verzeichnis-laden">Nur laden, ohne zu sichern</button>
+        Alle Bahnhöfe, Haltestellen, Abzweigungen, Anschlussgleise und Abstellanlagen der Schweiz,
+        sämtliche Bahnen. Der Aufbau läuft automatisch, sobald ein Administrator sich anmeldet und
+        das Verzeichnis fehlt oder älter als 90 Tage ist. Der Knopf unten erzwingt eine
+        Auffrischung ausserhalb dieses Rhythmus.</div>
+      <button class="btn voll" data-tat="verzeichnis-erneuern">Jetzt auffrischen</button>
     </div></div>
 
   <div class="abschnitt"><h2>Stammdaten</h2>
@@ -1702,12 +1763,6 @@ const TATEN = {
     const suche=$('p-suche'); if(suche) suche.value='';
     if(!e.dataset.abk) meldung('Abkürzung noch eintragen — im Verzeichnis nicht hinterlegt');
   },
-  'verzeichnis-laden': async ()=>{
-    meldung('Betriebspunktverzeichnis wird geladen …');
-    const v=await verzeichnisLaden();
-    zeichnen();
-    meldung(v?`${v.length} Betriebspunkte geladen`:'Verzeichnis '+(VERZ_FEHLER||'nicht erreichbar'), !v);
-  },
   'verzeichnis-erneuern': async ()=>{
     if(!confirm('Alle Betriebspunkte der Schweiz aus OpenStreetMap holen und in der Datenbank ablegen? Das dauert ein bis zwei Minuten.')) return;
     VERZEICHNIS=null;
@@ -2026,8 +2081,12 @@ async function sitzungWechsel(session){
       S.profil=neu;
     } else S.profil=data;
     await alleLaden();
-    verzeichnisLaden();          // aus der Datenbank, im Hintergrund
     ANSICHT='uebersicht';
+    /* Betriebspunktverzeichnis im Hintergrund aus der Datenbank holen */
+    verzeichnisLaden().then(v=>{
+      if(v) zeichnen();
+      verzeichnisPflegen();      // baut oder frischt auf, falls nötig
+    });
   } else { S.user=null; S.profil=null; }
   zeichnen();
 }
