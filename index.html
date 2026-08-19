@@ -1159,6 +1159,13 @@ async function verzeichnisSichern(){
   return true;
 }
 
+function normName(n){
+  return String(n||'').toLowerCase()
+    .replace(/[äàáâ]/g,'a').replace(/[öòóô]/g,'o').replace(/[üùúû]/g,'u')
+    .replace(/[éèêë]/g,'e').replace(/ç/g,'c').replace(/ß/g,'ss')
+    .replace(/[^a-z0-9]+/g,' ').trim();
+}
+
 function ausVerzeichnis(q){
   const kl=normName(q);
   if(!kl) return [];
@@ -1181,7 +1188,7 @@ function ausVerzeichnis(q){
   });
 
   /* 2) zusätzlich geladenes Verzeichnis (andere Bahnen) */
-  const quelle = VERZEICHNIS || ABK_LISTE;
+  const quelle = VERZEICHNIS;
   if(quelle){
     quelle.filter(x=>normName(x.name).includes(kl) || (x.abk && x.abk.toUpperCase().startsWith(kurz)))
       .slice(0,40).forEach(dazu);
@@ -1444,7 +1451,6 @@ function zeichneBpWahl(){
 }
 
 function formularPunkt(id){
-  abkIndexLaden();               // schlank, läuft im Hintergrund
   const p=id?punkt(id):null;
   ENTWURF=p?{...p}:{id:null,abk:'',name:'',typ:'Bahnhof',bahn:'',notiz:''};
   const typen=['Bahnhof','Rangierbahnhof','Haltestelle','Abzweigung','Anschlussgleis','Abstellanlage','Betriebsausweichstelle','Dienststation','Depot / Werkstätte','Grenzpunkt','Tunnelportal'];
@@ -3316,7 +3322,6 @@ async function sitzungWechsel(session){
     /* Betriebspunktverzeichnis im Hintergrund aus der Datenbank holen */
     verzeichnisLaden().then(v=>{
       if(v) zeichnen();
-      else abkIndexLaden();      // schlanker Ersatz, bis das Verzeichnis steht
       verzeichnisPflegen();      // baut oder frischt auf, falls nötig
     });
   } else { S.user=null; S.profil=null; }
