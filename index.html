@@ -756,7 +756,10 @@ function karteAufbauen(){
     if(schild) linie.bindTooltip(schild,{ permanent:true, direction:'center',
       className:'streckenschild', opacity:1 });
     linie.bindPopup(`<b>${esc(st.name)}</b><span class="pm">${st.linie?'BAV '+esc(st.linie)+' · ':''}${st.tabelle?'TAB '+esc(st.tabelle)+' · ':''}STRECKE</span>
-       ${ZTEXT[z]}${a?' · bis '+datum(a):''}${KARTENPERSON?'':`<br>
+       ${ZTEXT[z]}${a?' · bis '+datum(a):''}
+       <span class="pm">${hatVerlauf(st)
+         ? linien.length+' Gleis(e), '+linien.reduce((n,l)=>n+l.length,0)+' Punkte'
+         : 'ohne Gleisverlauf — gerade Verbindung'}</span>${KARTENPERSON?'':`<br>
        <button class="btn klein haupt" data-tat="gefahren" data-id="${st.id}" style="margin-top:8px">Heute gefahren</button>
        <button class="btn klein" data-tat="kenntnis-s" data-id="${st.id}" style="margin-top:8px">Kenntnis</button>`}`);
   });
@@ -927,6 +930,7 @@ function ausschnitt(a,b,weite){
 /* Quelle 1 — Schienennetz des Bundesamts für Verkehr über die
    Bundes-Geodienste. Schnell und ohne Wartezeiten.               */
 const GLEIS_SPEICHER=new Map();
+let VERLAUF_QUELLE='';
 
 async function gleiseBav(a,b,weite){
   const k=ausschnitt(a,b,weite);
@@ -938,7 +942,7 @@ async function gleiseBav(a,b,weite){
     + '&imageDisplay=1500,1500,96&tolerance=0&layers=all:ch.bav.schienennetz'
     + '&returnGeometry=true&geometryFormat=geojson&sr=4326&limit=500';
   const r=await fetch(url);
-  if(!r.ok) throw new Error('BAV '+r.status);
+  if(!r.ok) throw new Error('Amtliche Gleisdaten: Antwort '+r.status);
   const j=await r.json();
   const linien=[];
   (j.results||[]).forEach(f=>{
@@ -946,6 +950,9 @@ async function gleiseBav(a,b,weite){
     if(!g) return;
     if(g.type==='LineString') linien.push(g.coordinates);
     else if(g.type==='MultiLineString') g.coordinates.forEach(c=>linien.push(c));
+    else if(Array.isArray(g.paths)) g.paths.forEach(c=>linien.push(c));   // ESRI-Format
+    else if(Array.isArray(g.coordinates) && Array.isArray(g.coordinates[0]))
+      linien.push(g.coordinates);
   });
   GLEIS_SPEICHER.set(schluessel, linien);
   return linien;   // [[lon,lat], …] je Linie
@@ -1194,7 +1201,16 @@ async function abschnittWeg(A, B, hinweis){
       continue;
     }
     const teil=kuerzesterWeg(G,a.k,b.k);
-    if(teil) return { pfad:teil, spuren:spurenSammeln(G, teil, 45) };
+    if(teil){
+      /* Ein echter Gleisverlauf hat viele Stützpunkte. Wenige Punkte über
+         eine lange Strecke heisst: grobe Daten — dann lieber die nächste Quelle. */
+      const luft=meterAbstand(A,B);
+      const noetig=Math.max(4, Math.round(luft/400));
+      if(teil.length>=noetig)
+        return { pfad:teil, spuren:spurenSammeln(G, teil, 45), quelle:weg.quelle, punkte:teil.length };
+      grund='Gleisdaten zu grob ('+teil.length+' Stützpunkte auf '+Math.round(luft)+' m)';
+      continue;
+    }
     grund='Keine durchgehende Gleisverbindung gefunden';
   }
   throw new Error(grund+(hinweis?' ('+hinweis+')':''));
@@ -1216,11 +1232,13 @@ async function verlaufErmitteln(st){
   const misslungen=teile.find(t=>!t.ok);
   if(misslungen) throw new Error(misslungen.fehler);
 
-  let haupt=[]; const spuren=[];
+  let haupt=[]; const spuren=[]; const quellen=new Set();
   teile.forEach(t=>{
     haupt = haupt.length ? haupt.concat(t.wert.pfad.slice(1)) : t.wert.pfad;
     (t.wert.spuren||[]).forEach(l=>spuren.push(l));
+    if(t.wert.quelle) quellen.add(t.wert.quelle==='bav'?'amtlich':'OpenStreetMap');
   });
+  VERLAUF_QUELLE=[...quellen].join(' und ');
   const runden=l=>ausduennen(l,12).map(k=>[+k[0].toFixed(5), +k[1].toFixed(5)]);
   /* Erste Linie ist der Hauptweg, danach die übrigen Gleise */
   const linien=[runden(haupt)];
@@ -1807,7 +1825,7 @@ const TATEN = {
       if(error) return fehler(error);
       VERLAUF=[]; await alleLaden(); zeichnen();
       const punkte=pfad.reduce((n,l)=>n+l.length,0);
-      meldung(`${st.name}: ${pfad.length} Gleis(e) mit ${punkte} Punkten übernommen`);
+      meldung(`${st.name}: ${pfad.length} Gleis(e), ${punkte} Punkte — Quelle ${VERLAUF_QUELLE||'unbekannt'}`);
     }catch(e){ fehler(e); }
   },
   'verlauf-alle': async ()=>{
