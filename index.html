@@ -605,17 +605,30 @@ function kAblauf(art,id){
 }
 function darfStamm(o){ return istAdmin() || (o && o.erstellt_von===S.user.id); }
 
+/* Liefert immer eine Liste von Linien.
+   Alte Datensätze enthalten nur eine Punktfolge — die wird erkannt. */
 function streckenGeometrie(st){
-  if(Array.isArray(st.verlauf) && st.verlauf.length>1) return st.verlauf.map(k=>[k[0],k[1]]);
-  return (st.punkte||[]).map(punkt).filter(hatKoord).map(p=>[p.lat,p.lon]);
+  const v=st.verlauf;
+  if(Array.isArray(v) && v.length){
+    if(typeof v[0][0]==='number' && v.length>1) return [v.map(k=>[k[0],k[1]])];
+    if(Array.isArray(v[0]) && Array.isArray(v[0][0]))
+      return v.filter(l=>Array.isArray(l)&&l.length>1).map(l=>l.map(k=>[k[0],k[1]]));
+  }
+  const gerade=(st.punkte||[]).map(punkt).filter(hatKoord).map(p=>[p.lat,p.lon]);
+  return gerade.length>1 ? [gerade] : [];
+}
+function hatVerlauf(st){
+  const v=st.verlauf;
+  return Array.isArray(v) && v.length>0 &&
+    ((typeof v[0][0]==='number' && v.length>1) || (Array.isArray(v[0]) && v[0].length>1));
 }
 
 function ansichtKarte(){
   const ohne = S.punkte.filter(p=>!hatKoord(p)).length;
-  const zeichenbar = S.strecken.filter(st=>streckenGeometrie(st).length>=2);
-  const stumm = S.strecken.filter(st=>streckenGeometrie(st).length<2);
+  const zeichenbar = S.strecken.filter(st=>streckenGeometrie(st).length>0);
+  const stumm = S.strecken.filter(st=>streckenGeometrie(st).length===0);
   const ohneNr = zeichenbar.filter(st=>!st.linie && !st.tabelle);
-  const gerade = zeichenbar.filter(st=>!(Array.isArray(st.verlauf)&&st.verlauf.length>1));
+  const gerade = zeichenbar.filter(st=>!hatVerlauf(st));
   const wahl = KARTENMODUS==='punkt'
     ? `<label style="margin-bottom:9px"><span>Betriebspunkt wählen, dann auf die Karte tippen</span>
         <select id="kz-punkt">${S.punkte.slice().sort((a,b)=>(hatKoord(a)?1:0)-(hatKoord(b)?1:0)||a.name.localeCompare(b.name,'de'))
@@ -720,15 +733,25 @@ function karteAufbauen(){
 
   /* Strecken als Linien, eingefärbt nach eigenem Kenntnisstand */
   S.strecken.forEach(st=>{
-    const pfad=streckenGeometrie(st);
+    const linien=streckenGeometrie(st);
+    if(!linien.length) return;
+    const pfad=linien[0];
     if(pfad.length<2) return;
     const z=kZustand('strecke',st.id), a=kAblauf('strecke',st.id);
     const teile=[];
     if(st.linie)   teile.push(`<span class="ss-art">Strecke</span> <span class="ss-nr">${esc(st.linie)}</span>`);
     if(st.tabelle) teile.push(`<span class="ss-art">Tabelle</span> <span class="ss-tab">${esc(st.tabelle)}</span>`);
     const schild = teile.join(' <span class="ss-strich">|</span> ');
+    const gestrichelt = hatVerlauf(st) ? null : '9 7';
+
+    /* Weitere Gleise derselben Strecke — dünner, gleiche Farbe */
+    linien.slice(1).forEach(l=>{
+      L.polyline(l,{ color:ZHEX[z], weight:z==='keine'?2:3.5,
+        opacity:z==='keine'?.45:.75 }).addTo(KARTE);
+    });
+
     const linie = L.polyline(pfad,{ color:ZHEX[z], weight:z==='keine'?3:5, opacity:z==='keine'?.55:.9,
-      dashArray: st.verlauf&&st.verlauf.length>1 ? null : '9 7' })
+      dashArray: gestrichelt })
      .addTo(KARTE);
     if(schild) linie.bindTooltip(schild,{ permanent:true, direction:'center',
       className:'streckenschild', opacity:1 });
@@ -1081,6 +1104,67 @@ function abstandZurLinie(p,a,b){
 }
 
 /* Einen einzelnen Abschnitt berechnen */
+/* Alle Gleise im Korridor um den gefundenen Weg — bei Doppelspur
+   und in Bahnhöfen gilt die Kenntnis für sämtliche Gleise.        */
+function spurenSammeln(G, pfad, radius){
+  if(!pfad || pfad.length<2) return [];
+  /* Raster über den Weg, damit die Prüfung nicht quadratisch wird */
+  const zelle=0.0009;                       // rund 100 Meter
+  const raster=new Set();
+  const schluessel=(la,lo)=>Math.round(la/zelle)+':'+Math.round(lo/zelle);
+  pfad.forEach(([la,lo])=>{
+    for(let dla=-1;dla<=1;dla++) for(let dlo=-1;dlo<=1;dlo++)
+      raster.add((Math.round(la/zelle)+dla)+':'+(Math.round(lo/zelle)+dlo));
+  });
+  const nah=(la,lo)=>{
+    if(!raster.has(schluessel(la,lo))) return false;
+    for(let i=0;i<pfad.length;i++) if(meterAbstand([la,lo],pfad[i])<radius) return true;
+    return false;
+  };
+
+  /* Kanten im Korridor sammeln */
+  const kanten=new Map();
+  G.forEach((v,k)=>{
+    if(!nah(v.lat,v.lon)) return;
+    v.n.forEach(([nk])=>{
+      const w=G.get(nk); if(!w || !nah(w.lat,w.lon)) return;
+      const id = k<nk ? k+'>'+nk : nk+'>'+k;
+      if(!kanten.has(id)) kanten.set(id,[k,nk]);
+    });
+  });
+  if(!kanten.size) return [];
+
+  /* Kanten zu Linienzügen verketten */
+  const offen=new Map();
+  kanten.forEach(([a,b])=>{
+    (offen.get(a)||offen.set(a,[]).get(a)).push(b);
+    (offen.get(b)||offen.set(b,[]).get(b)).push(a);
+  });
+  const benutzt=new Set();
+  const linien=[];
+  const kante=(a,b)=> a<b ? a+'>'+b : b+'>'+a;
+
+  const starte=k=>{
+    const linie=[];
+    let hier=k;
+    for(;;){
+      const v=G.get(hier); if(!v) break;
+      linie.push([v.lat,v.lon]);
+      const weiter=(offen.get(hier)||[]).find(n=>!benutzt.has(kante(hier,n)));
+      if(!weiter) break;
+      benutzt.add(kante(hier,weiter));
+      hier=weiter;
+    }
+    if(linie.length>1) linien.push(linie);
+  };
+  /* zuerst an Enden beginnen, dann Restschlaufen */
+  [...offen.keys()].filter(k=>(offen.get(k)||[]).length===1).forEach(starte);
+  [...offen.keys()].forEach(k=>{
+    if((offen.get(k)||[]).some(n=>!benutzt.has(kante(k,n)))) starte(k);
+  });
+  return linien;
+}
+
 async function abschnittWeg(A, B, hinweis){
   if(meterAbstand(A,B)>80000) throw new Error('Abschnitt zu lang — Zwischenbetriebspunkte erfassen');
   let grund='';
@@ -1110,7 +1194,7 @@ async function abschnittWeg(A, B, hinweis){
       continue;
     }
     const teil=kuerzesterWeg(G,a.k,b.k);
-    if(teil) return teil;
+    if(teil) return { pfad:teil, spuren:spurenSammeln(G, teil, 45) };
     grund='Keine durchgehende Gleisverbindung gefunden';
   }
   throw new Error(grund+(hinweis?' ('+hinweis+')':''));
@@ -1132,9 +1216,19 @@ async function verlaufErmitteln(st){
   const misslungen=teile.find(t=>!t.ok);
   if(misslungen) throw new Error(misslungen.fehler);
 
-  let gesamt=[];
-  teile.forEach(t=>{ gesamt = gesamt.length ? gesamt.concat(t.wert.slice(1)) : t.wert; });
-  return ausduennen(gesamt, 12).map(k=>[+k[0].toFixed(5), +k[1].toFixed(5)]);
+  let haupt=[]; const spuren=[];
+  teile.forEach(t=>{
+    haupt = haupt.length ? haupt.concat(t.wert.pfad.slice(1)) : t.wert.pfad;
+    (t.wert.spuren||[]).forEach(l=>spuren.push(l));
+  });
+  const runden=l=>ausduennen(l,12).map(k=>[+k[0].toFixed(5), +k[1].toFixed(5)]);
+  /* Erste Linie ist der Hauptweg, danach die übrigen Gleise */
+  const linien=[runden(haupt)];
+  spuren.filter(l=>l.length>2).forEach(l=>{
+    const r=runden(l);
+    if(r.length>1) linien.push(r);
+  });
+  return linien;
 }
 
 /* ---------- Vorschläge beim Erfassen einer Anlage ---------- */
@@ -1712,13 +1806,14 @@ const TATEN = {
       const {error}=await db.from('strecke').update({verlauf:pfad}).eq('id',st.id);
       if(error) return fehler(error);
       VERLAUF=[]; await alleLaden(); zeichnen();
-      meldung(`${st.name}: Gleisverlauf mit ${pfad.length} Punkten übernommen`);
+      const punkte=pfad.reduce((n,l)=>n+l.length,0);
+      meldung(`${st.name}: ${pfad.length} Gleis(e) mit ${punkte} Punkten übernommen`);
     }catch(e){ fehler(e); }
   },
   'verlauf-alle': async ()=>{
-    const zuwenig=S.strecken.filter(st=>darfStamm(st) && !(Array.isArray(st.verlauf)&&st.verlauf.length>1)
+    const zuwenig=S.strecken.filter(st=>darfStamm(st) && !hatVerlauf(st)
       && (st.punkte||[]).map(punkt).filter(hatKoord).length<2);
-    const offen=S.strecken.filter(st=>darfStamm(st) && !(Array.isArray(st.verlauf)&&st.verlauf.length>1)
+    const offen=S.strecken.filter(st=>darfStamm(st) && !hatVerlauf(st)
       && (st.punkte||[]).map(punkt).filter(hatKoord).length>=2);
     if(!offen.length && !zuwenig.length){ meldung('Alle Strecken haben bereits einen Gleisverlauf'); return; }
     const probleme=zuwenig.map(st=>({name:st.name,
@@ -1756,7 +1851,7 @@ const TATEN = {
     if(!st){ meldung('Keine Strecke gewählt', true); return; }
     if(!darfStamm(st)){ meldung('Nur die erfassende Person oder ein Administrator darf den Verlauf ändern', true); return; }
     if(VERLAUF.length===1){ meldung('Mindestens zwei Stützpunkte nötig', true); return; }
-    const {error}=await db.from('strecke').update({verlauf:VERLAUF}).eq('id',sid);
+    const {error}=await db.from('strecke').update({verlauf:[VERLAUF]}).eq('id',sid);
     if(error) return fehler(error);
     VERLAUF=[]; await alleLaden(); zeichnen();
     meldung('Streckenverlauf gesichert');
