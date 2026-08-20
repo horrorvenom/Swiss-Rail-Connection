@@ -1102,6 +1102,32 @@ function kuerzesterWeg(G,start,ziel){
   return pfad;
 }
 
+/* Formerhaltende Ausdünnung: behält jeden Punkt, der weit genug vom
+   letzten entfernt ist oder an dem die Richtung deutlich wechselt.
+   Anders als Douglas-Peucker bleibt sie auch dann zuverlässig, wenn
+   eine Linie hin und zurück läuft — etwa über beide Gleise.        */
+function verduennen(linie, minMeter, gradGrenze){
+  if(!linie || linie.length<3) return linie||[];
+  const raus=[linie[0]];
+  let letzter=linie[0], richtung=null;
+  const winkel=(a,b)=>Math.atan2(b[0]-a[0], (b[1]-a[1])*Math.cos(a[0]*Math.PI/180))*180/Math.PI;
+  for(let i=1;i<linie.length-1;i++){
+    const p=linie[i];
+    const d=meterAbstand(letzter,p);
+    const w=winkel(letzter,p);
+    let knick=false;
+    if(richtung!==null){
+      let diff=Math.abs(w-richtung); if(diff>180) diff=360-diff;
+      knick = diff>gradGrenze;
+    }
+    if(d>=minMeter || knick){
+      raus.push(p); letzter=p; richtung=w;
+    }
+  }
+  raus.push(linie[linie.length-1]);
+  return raus;
+}
+
 /* Douglas-Peucker — hält die Punktzahl klein, ohne den Verlauf zu verfälschen */
 function ausduennen(pfad, tol){
   if(pfad.length<3) return pfad;
@@ -1134,59 +1160,82 @@ function abstandZurLinie(p,a,b){
    und in Bahnhöfen gilt die Kenntnis für sämtliche Gleise.        */
 function spurenSammeln(G, pfad, radius){
   if(!pfad || pfad.length<2) return [];
-  /* Raster über den Weg, damit die Prüfung nicht quadratisch wird */
-  const zelle=0.0009;                       // rund 100 Meter
-  const raster=new Set();
-  const schluessel=(la,lo)=>Math.round(la/zelle)+':'+Math.round(lo/zelle);
-  pfad.forEach(([la,lo])=>{
-    for(let dla=-1;dla<=1;dla++) for(let dlo=-1;dlo<=1;dlo++)
-      raster.add((Math.round(la/zelle)+dla)+':'+(Math.round(lo/zelle)+dlo));
+
+  /* Raster über den Weg: je Zelle die enthaltenen Wegpunkte.
+     So wird nur gegen die Punkte in der Nachbarschaft geprüft. */
+  const zelle=0.0009;                          // rund 100 Meter
+  const feld=new Map();
+  const zellID=(la,lo)=>Math.round(la/zelle)+':'+Math.round(lo/zelle);
+  pfad.forEach(pt=>{
+    const id=zellID(pt[0],pt[1]);
+    if(!feld.has(id)) feld.set(id,[]);
+    feld.get(id).push(pt);
   });
   const nah=(la,lo)=>{
-    if(!raster.has(schluessel(la,lo))) return false;
-    for(let i=0;i<pfad.length;i++) if(meterAbstand([la,lo],pfad[i])<radius) return true;
+    const zla=Math.round(la/zelle), zlo=Math.round(lo/zelle);
+    for(let d=-1;d<=1;d++) for(let e=-1;e<=1;e++){
+      const liste=feld.get((zla+d)+':'+(zlo+e));
+      if(!liste) continue;
+      for(let i=0;i<liste.length;i++) if(meterAbstand([la,lo],liste[i])<radius) return true;
+    }
     return false;
   };
 
   /* Kanten im Korridor sammeln */
-  const kanten=new Map();
-  G.forEach((v,k)=>{
-    if(!nah(v.lat,v.lon)) return;
+  const drin=new Map();                        // Knoten → true
+  G.forEach((v,k)=>{ if(nah(v.lat,v.lon)) drin.set(k,true); });
+  if(!drin.size) return [];
+
+  const nachbar=new Map();
+  const kanten=[];
+  const kid=(a,b)=> a<b ? a+'|'+b : b+'|'+a;
+  const gesehen=new Set();
+  drin.forEach((_,k)=>{
+    const v=G.get(k);
     v.n.forEach(([nk])=>{
-      const w=G.get(nk); if(!w || !nah(w.lat,w.lon)) return;
-      const id = k<nk ? k+'>'+nk : nk+'>'+k;
-      if(!kanten.has(id)) kanten.set(id,[k,nk]);
+      if(!drin.has(nk)) return;
+      const id=kid(k,nk);
+      if(gesehen.has(id)) return;
+      gesehen.add(id);
+      kanten.push([k,nk]);
+      if(!nachbar.has(k)) nachbar.set(k,[]);
+      if(!nachbar.has(nk)) nachbar.set(nk,[]);
+      nachbar.get(k).push(nk);
+      nachbar.get(nk).push(k);
     });
   });
-  if(!kanten.size) return [];
+  if(!kanten.length) return [];
 
-  /* Kanten zu Linienzügen verketten */
-  const offen=new Map();
-  kanten.forEach(([a,b])=>{
-    (offen.get(a)||offen.set(a,[]).get(a)).push(b);
-    (offen.get(b)||offen.set(b,[]).get(b)).push(a);
-  });
+  /* Kanten zu Linien verketten — von jeder Startkante aus in BEIDE
+     Richtungen laufen. Sonst bricht ein durchgehendes Gegengleis,
+     das beidseits in Weichen mündet, nach der halben Länge ab.   */
   const benutzt=new Set();
   const linien=[];
-  const kante=(a,b)=> a<b ? a+'>'+b : b+'>'+a;
-
-  const starte=k=>{
-    const linie=[];
-    let hier=k;
+  const weiter=(von, nach)=>{
+    const folge=[nach];
+    let a=von, b=nach;
     for(;;){
-      const v=G.get(hier); if(!v) break;
-      linie.push([v.lat,v.lon]);
-      const weiter=(offen.get(hier)||[]).find(n=>!benutzt.has(kante(hier,n)));
-      if(!weiter) break;
-      benutzt.add(kante(hier,weiter));
-      hier=weiter;
+      benutzt.add(kid(a,b));
+      const frei=(nachbar.get(b)||[]).filter(n=>!benutzt.has(kid(b,n)));
+      if(!frei.length) break;
+      a=b; b=frei[0];
+      folge.push(b);
     }
-    if(linie.length>1) linien.push(linie);
+    return folge;
   };
-  /* zuerst an Enden beginnen, dann Restschlaufen */
-  [...offen.keys()].filter(k=>(offen.get(k)||[]).length===1).forEach(starte);
-  [...offen.keys()].forEach(k=>{
-    if((offen.get(k)||[]).some(n=>!benutzt.has(kante(k,n)))) starte(k);
+
+  kanten.forEach(([a,b])=>{
+    if(benutzt.has(kid(a,b))) return;
+    benutzt.add(kid(a,b));
+    const vorwaerts=weiter(a,b);               // ab b weiter
+    benutzt.delete(kid(a,b));
+    benutzt.add(kid(a,b));
+    const rueckwaerts=weiter(b,a);             // ab a in die Gegenrichtung
+    const folge=rueckwaerts.slice().reverse().concat([/* a schon enthalten */], vorwaerts);
+    const bereinigt=[];
+    folge.forEach(k=>{ if(k && bereinigt[bereinigt.length-1]!==k) bereinigt.push(k); });
+    if(bereinigt.length>1)
+      linien.push(bereinigt.map(k=>{ const v=G.get(k); return [v.lat,v.lon]; }));
   });
   return linien;
 }
@@ -1226,7 +1275,7 @@ async function abschnittWeg(A, B, hinweis){
       const luft=meterAbstand(A,B);
       const noetig=Math.max(4, Math.round(luft/400));
       if(teil.length>=noetig)
-        return { pfad:teil, spuren:spurenSammeln(G, teil, 45), quelle:weg.quelle, punkte:teil.length };
+        return { pfad:teil, spuren:spurenSammeln(G, teil, 60), quelle:weg.quelle, punkte:teil.length };
       grund='Gleisdaten zu grob ('+teil.length+' Stützpunkte auf '+Math.round(luft)+' m)';
       continue;
     }
@@ -1258,10 +1307,11 @@ async function verlaufErmitteln(st){
     if(t.wert.quelle) quellen.add(t.wert.quelle==='bav'?'amtlich':'OpenStreetMap');
   });
   VERLAUF_QUELLE=[...quellen].join(' und ');
-  const runden=l=>ausduennen(l,12).map(k=>[+k[0].toFixed(5), +k[1].toFixed(5)]);
+  const runden=l=>verduennen(l,30,12).map(k=>[+k[0].toFixed(5), +k[1].toFixed(5)]);
   /* Erste Linie ist der Hauptweg, danach die übrigen Gleise */
   const linien=[runden(haupt)];
-  spuren.filter(l=>l.length>2).forEach(l=>{
+  spuren.forEach(l=>{
+    if(l.length<2) return;
     const r=runden(l);
     if(r.length>1) linien.push(r);
   });
