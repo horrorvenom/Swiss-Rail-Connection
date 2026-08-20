@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Swiss Rail Connections — Kenntnisregister</title>
+<meta name="version" content="2026-08-20-a">
 <link rel="icon" type="image/png" href="logo-marke.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
@@ -200,6 +201,7 @@ nav svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.6;st
          onerror="this.remove();var t=document.getElementById('marke-text');if(t)t.hidden=false">
     <h1 id="marke-text" hidden>Swiss Rail Connections</h1>
     <span class="kennung" id="kennung"></span>
+    <span class="kennung" id="fassung" style="margin-left:8px;opacity:.55">v20-a</span>
   </div>
   <div class="statuszeile" id="statuszeile"></div>
 </header>
@@ -252,7 +254,7 @@ let S = {
 };
 let ANSICHT='uebersicht', SUCHE='', FILTER='alle', JOURNAL='fahrten',
     TEAMMODUS='mitarbeiter', ENTWURF=null, TORMODUS='anmelden';
-let STRECKE_ZURUECK=null;
+let STRECKE_ZURUECK=null, ALLE_NEU=false;
 let KARTE=null, KARTENSICHT={center:[46.82,8.23], zoom:8},
     KARTENMODUS='ansehen', KARTENZIEL='', VERLAUF=[], KARTENPERSON='';
 
@@ -617,10 +619,22 @@ function streckenGeometrie(st){
   const gerade=(st.punkte||[]).map(punkt).filter(hatKoord).map(p=>[p.lat,p.lon]);
   return gerade.length>1 ? [gerade] : [];
 }
-function hatVerlauf(st){
+/* Ein gespeicherter Verlauf zählt nur, wenn er wirklich den Gleisen folgt.
+   Eine Gerade aus zwei Punkten ist kein Verlauf — sonst verschwindet der
+   Knopf zum Neuberechnen und die Strecke bleibt für immer falsch. */
+function verlaufPunkte(st){
   const v=st.verlauf;
-  return Array.isArray(v) && v.length>0 &&
-    ((typeof v[0][0]==='number' && v.length>1) || (Array.isArray(v[0]) && v[0].length>1));
+  if(!Array.isArray(v) || !v.length) return null;
+  if(typeof v[0][0]==='number') return v.length>1 ? v : null;      // alte Fassung
+  if(Array.isArray(v[0]) && Array.isArray(v[0][0])) return v[0].length>1 ? v[0] : null;
+  return null;
+}
+function hatVerlauf(st){
+  const haupt=verlaufPunkte(st);
+  if(!haupt || haupt.length<4) return false;
+  let laenge=0;
+  for(let i=1;i<haupt.length;i++) laenge+=meterAbstand(haupt[i-1],haupt[i]);
+  return haupt.length >= Math.max(4, laenge/400);   // ein Stützpunkt je 400 m
 }
 
 function ansichtKarte(){
@@ -695,10 +709,15 @@ function ansichtKarte(){
     <span class="mono"><span class="ss-tab">■</span> Streckentabelle R 30131</span>
     <span>Schwarze Zahlen im Kartenbild stammen vom Bundesamt für Verkehr</span>
   </div>
-  ${gerade.length?`<div class="aktionen" style="margin-top:12px">
-      <button class="btn haupt voll" data-tat="verlauf-alle">${gerade.length} Strecke(n) auf die Gleise legen</button>
-    </div>
-    <div class="fussnote" style="margin-top:8px">Strecken ohne eigenen Verlauf sind gestrichelt und laufen schnurgerade zwischen den Bahnhöfen. Der Knopf berechnet den echten Gleisverlauf aus OpenStreetMap; für alle Strecken zusammen dauert das einige Minuten.</div>`:''}
+  <div class="aktionen" style="margin-top:12px">
+    ${gerade.length?`<button class="btn haupt voll" data-tat="verlauf-alle">${gerade.length} Strecke(n) auf die Gleise legen</button>`:''}
+    <button class="btn voll" data-tat="verlauf-alle-neu">Alle ${zeichenbar.length} Verläufe neu berechnen</button>
+  </div>
+  <div class="fussnote" style="margin-top:8px">
+    ${zeichenbar.length-gerade.length} von ${zeichenbar.length} Strecken folgen den Gleisen.
+    Gestrichelte Linien laufen schnurgerade zwischen den Bahnhöfen — ein gespeicherter Verlauf mit
+    zu wenigen Stützpunkten zählt dabei ausdrücklich als «kein Verlauf».
+  </div>
   <div class="aktionen" style="margin-top:12px">
     ${ohne?`<button class="btn voll" data-tat="koordinaten-suchen">${ohne} fehlende Koordinaten holen</button>`:''}
     <button class="btn voll" data-tat="koordinaten-pruefen">Lage aller Punkte amtlich prüfen</button>
@@ -1828,10 +1847,17 @@ const TATEN = {
       meldung(`${st.name}: ${pfad.length} Gleis(e), ${punkte} Punkte — Quelle ${VERLAUF_QUELLE||'unbekannt'}`);
     }catch(e){ fehler(e); }
   },
+  'verlauf-alle-neu': async ()=>{
+    if(!confirm('Den Gleisverlauf ALLER Strecken neu berechnen? Bestehende Verläufe werden überschrieben.')) return;
+    ALLE_NEU=true;
+    await TATEN['verlauf-alle']();
+    ALLE_NEU=false;
+  },
   'verlauf-alle': async ()=>{
-    const zuwenig=S.strecken.filter(st=>darfStamm(st) && !hatVerlauf(st)
+    const braucht=st=>ALLE_NEU || !hatVerlauf(st);
+    const zuwenig=S.strecken.filter(st=>darfStamm(st) && braucht(st)
       && (st.punkte||[]).map(punkt).filter(hatKoord).length<2);
-    const offen=S.strecken.filter(st=>darfStamm(st) && !hatVerlauf(st)
+    const offen=S.strecken.filter(st=>darfStamm(st) && braucht(st)
       && (st.punkte||[]).map(punkt).filter(hatKoord).length>=2);
     if(!offen.length && !zuwenig.length){ meldung('Alle Strecken haben bereits einen Gleisverlauf'); return; }
     const probleme=zuwenig.map(st=>({name:st.name,
