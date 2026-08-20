@@ -877,27 +877,71 @@ function meterAbstand(a,b){
   return Math.sqrt(dφ*dφ + x*x)*R;
 }
 
-async function gleiseHolen(a,b,weite){
-  const f=weite||1;
-  /* Enger Ausschnitt: weniger Daten, kürzere Rechenzeit auf dem Server */
-  const puffer=Math.max(0.018, Math.abs(a[0]-b[0])*0.18, Math.abs(a[1]-b[1])*0.18)*f;
-  const s=Math.min(a[0],b[0])-puffer, n=Math.max(a[0],b[0])+puffer;
-  const w=Math.min(a[1],b[1])-puffer, e=Math.max(a[1],b[1])+puffer;
-  const query=`[out:json][timeout:180];way["railway"~"^(rail|light_rail|narrow_gauge)$"]`
-        + `(${s},${w},${n},${e});out body;>;out skel qt;`;
+/* Mehrere Abfragen gleichzeitig laufen lassen, aber nicht unbegrenzt —
+   sonst drosseln die Server. */
+async function gleichzeitig(aufgaben, grenze){
+  const raus=new Array(aufgaben.length);
+  let naechste=0;
+  const arbeiter=async()=>{
+    for(;;){
+      const k=naechste++;
+      if(k>=aufgaben.length) return;
+      try{ raus[k]={ok:true, wert:await aufgaben[k]()}; }
+      catch(e){ raus[k]={ok:false, fehler:(e&&e.message)||String(e)}; }
+    }
+  };
+  await Promise.all(Array.from({length:Math.min(grenze,aufgaben.length)}, arbeiter));
+  return raus;
+}
 
-  /* Overpass ist zeitweise überlastet (429/504). Mehrfach versuchen,
-     abwechselnd auf beiden Servern, mit wachsender Pause. */
+function ausschnitt(a,b,weite){
+  const f=weite||1;
+  const puffer=Math.max(0.018, Math.abs(a[0]-b[0])*0.18, Math.abs(a[1]-b[1])*0.18)*f;
+  return { s:Math.min(a[0],b[0])-puffer, n:Math.max(a[0],b[0])+puffer,
+           w:Math.min(a[1],b[1])-puffer, e:Math.max(a[1],b[1])+puffer };
+}
+
+/* Quelle 1 — Schienennetz des Bundesamts für Verkehr über die
+   Bundes-Geodienste. Schnell und ohne Wartezeiten.               */
+const GLEIS_SPEICHER=new Map();
+
+async function gleiseBav(a,b,weite){
+  const k=ausschnitt(a,b,weite);
+  const rahmen=`${k.w},${k.s},${k.e},${k.n}`;
+  const schluessel='bav:'+rahmen;
+  if(GLEIS_SPEICHER.has(schluessel)) return GLEIS_SPEICHER.get(schluessel);
+  const url='https://api3.geo.admin.ch/rest/services/api/MapServer/identify'
+    + `?geometryType=esriGeometryEnvelope&geometry=${rahmen}&mapExtent=${rahmen}`
+    + '&imageDisplay=1500,1500,96&tolerance=0&layers=all:ch.bav.schienennetz'
+    + '&returnGeometry=true&geometryFormat=geojson&sr=4326&limit=500';
+  const r=await fetch(url);
+  if(!r.ok) throw new Error('BAV '+r.status);
+  const j=await r.json();
+  const linien=[];
+  (j.results||[]).forEach(f=>{
+    const g=f.geometry||f.geometryGeoJSON;
+    if(!g) return;
+    if(g.type==='LineString') linien.push(g.coordinates);
+    else if(g.type==='MultiLineString') g.coordinates.forEach(c=>linien.push(c));
+  });
+  GLEIS_SPEICHER.set(schluessel, linien);
+  return linien;   // [[lon,lat], …] je Linie
+}
+
+/* Quelle 2 — OpenStreetMap. Zeitvorgabe bewusst kurz: Der Netzzugang
+   des Servers bricht nach rund 90 Sekunden ab, eine längere Vorgabe
+   führt nur zur Fehlermeldung 504 statt zu einem Ergebnis.        */
+async function gleiseOsm(a,b,weite){
+  const k=ausschnitt(a,b,weite);
+  const query=`[out:json][timeout:50];way["railway"~"^(rail|light_rail|narrow_gauge)$"]`
+        + `(${k.s},${k.w},${k.n},${k.e});out body;>;out skel qt;`;
   const warten=ms=>new Promise(r=>setTimeout(r,ms));
   let letzter='';
-  for(let runde=0; runde<3; runde++){
+  for(let runde=0; runde<2; runde++){
     for(const url of OVERPASS){
       try{
         const r=await fetch(url,{ method:'POST', body:'data='+encodeURIComponent(query) });
-        if(r.ok){
-          const j=await r.json();
-          return j.elements||[];
-        }
+        if(r.ok){ const j=await r.json(); return j.elements||[]; }
         letzter = r.status===504 ? 'Gleisdatenserver überlastet'
                 : r.status===429 ? 'Gleisdatenserver drosselt gerade'
                 : 'Gleisdatenserver antwortet mit '+r.status;
@@ -905,14 +949,30 @@ async function gleiseHolen(a,b,weite){
         if(err.name==='AbortError') throw err;
         letzter='Gleisdatenserver nicht erreichbar';
       }
-      await warten(1200);
+      await warten(900);
     }
-    if(runde<2){
-      meldung(letzter+' — neuer Versuch in '+((runde+1)*6)+' Sekunden …', true);
-      await warten((runde+1)*6000);
-    }
+    if(runde===0) await warten(4000);
   }
   throw new Error(letzter||'Gleisdaten nicht erreichbar');
+}
+
+/* Graph aus Linienzügen — Knoten auf etwa einen Meter gerundet,
+   damit aneinanderstossende Linien verbunden werden.             */
+function graphAusLinien(linien){
+  const G=new Map();
+  const key=(la,lo)=>la.toFixed(5)+','+lo.toFixed(5);
+  const hole=(la,lo)=>{ const k=key(la,lo);
+    if(!G.has(k)) G.set(k,{lat:la,lon:lo,n:[]}); return {k, v:G.get(k)}; };
+  linien.forEach(linie=>{
+    for(let i=1;i<linie.length;i++){
+      const A=hole(linie[i-1][1], linie[i-1][0]);
+      const B=hole(linie[i][1],   linie[i][0]);
+      if(A.k===B.k) continue;
+      const d=meterAbstand([A.v.lat,A.v.lon],[B.v.lat,B.v.lon]);
+      A.v.n.push([B.k,d]); B.v.n.push([A.k,d]);
+    }
+  });
+  return G;
 }
 
 function graphBauen(elemente){
@@ -937,13 +997,27 @@ function graphBauen(elemente){
 }
 
 function naechsterKnoten(G,pt){
+  /* Erst in einem engen Fenster suchen, nur bei Bedarf alles durchgehen */
+  for(const spanne of [0.004, 0.02, 0.09]){
+    let best=null, bd=Infinity;
+    G.forEach((v,k)=>{
+      if(Math.abs(v.lat-pt[0])>spanne || Math.abs(v.lon-pt[1])>spanne*1.4) return;
+      const d=meterAbstand(pt,[v.lat,v.lon]);
+      if(d<bd){ bd=d; best=k; }
+    });
+    if(best) return {k:best, d:bd};
+  }
   let best=null, bd=Infinity;
   G.forEach((v,k)=>{ const d=meterAbstand(pt,[v.lat,v.lon]); if(d<bd){ bd=d; best=k; } });
   return {k:best, d:bd};
 }
 
 function kuerzesterWeg(G,start,ziel){
-  const heap=[], dist=new Map([[start,0]]), vor=new Map(), fertig=new Set();
+  const zielKnoten=G.get(ziel);
+  if(!zielKnoten) return null;
+  const zp=[zielKnoten.lat, zielKnoten.lon];
+  /* A*: die Luftlinie zum Ziel lenkt die Suche und spart viele Knoten */
+  const heap=[], g=new Map([[start,0]]), vor=new Map(), fertig=new Set();
   const rein=x=>{ heap.push(x); let i=heap.length-1;
     while(i>0){ const p=(i-1)>>1; if(heap[p][0]<=heap[i][0]) break;
       [heap[p],heap[i]]=[heap[i],heap[p]]; i=p; } };
@@ -954,16 +1028,23 @@ function kuerzesterWeg(G,start,ziel){
         if(r<heap.length&&heap[r][0]<heap[m][0]) m=r;
         if(m===i) break; [heap[m],heap[i]]=[heap[i],heap[m]]; i=m; } }
     return top; };
-  rein([0,start]);
+  const schaetzung=k=>{ const v=G.get(k); return v?meterAbstand([v.lat,v.lon],zp):0; };
+
+  rein([schaetzung(start), start]);
   while(heap.length){
-    const [d,k]=raus();
+    const [,k]=raus();
     if(fertig.has(k)) continue;
     fertig.add(k);
     if(k===ziel) break;
     const v=G.get(k); if(!v) continue;
+    const gk=g.get(k);
     for(const [nk,nd] of v.n){
-      const alt=d+nd;
-      if(alt < (dist.has(nk)?dist.get(nk):Infinity)){ dist.set(nk,alt); vor.set(nk,k); rein([alt,nk]); }
+      if(fertig.has(nk)) continue;
+      const alt=gk+nd;
+      if(alt < (g.has(nk)?g.get(nk):Infinity)){
+        g.set(nk,alt); vor.set(nk,k);
+        rein([alt+schaetzung(nk), nk]);
+      }
     }
   }
   if(start!==ziel && !vor.has(ziel)) return null;
@@ -999,34 +1080,60 @@ function abstandZurLinie(p,a,b){
   return meterAbstand(p,[a[0]+t*(b[0]-a[0]), a[1]+t*(b[1]-a[1])]);
 }
 
+/* Einen einzelnen Abschnitt berechnen */
+async function abschnittWeg(A, B, hinweis){
+  if(meterAbstand(A,B)>80000) throw new Error('Abschnitt zu lang — Zwischenbetriebspunkte erfassen');
+  let grund='';
+  const wege=[
+    {quelle:'bav', weite:1},
+    {quelle:'bav', weite:2.2},
+    {quelle:'osm', weite:1},
+    {quelle:'osm', weite:2.2}
+  ];
+  for(const weg of wege){
+    let G=null;
+    try{
+      if(weg.quelle==='bav'){
+        const linien=await gleiseBav(A,B,weg.weite);
+        if(linien.length) G=graphAusLinien(linien);
+        else grund='Keine amtlichen Gleisdaten in diesem Bereich';
+      } else {
+        const elemente=await gleiseOsm(A,B,weg.weite);
+        if(elemente.length) G=graphBauen(elemente);
+        else grund='Keine Gleisdaten in diesem Bereich';
+      }
+    }catch(e){ grund=(e&&e.message)||String(e); }
+    if(!G || !G.size) continue;
+    const a=naechsterKnoten(G,A), b=naechsterKnoten(G,B);
+    if(a.d>1500 || b.d>1500){
+      grund='Betriebspunkt liegt '+Math.round(Math.max(a.d,b.d))+' m vom nächsten Gleis — Koordinate prüfen';
+      continue;
+    }
+    const teil=kuerzesterWeg(G,a.k,b.k);
+    if(teil) return teil;
+    grund='Keine durchgehende Gleisverbindung gefunden';
+  }
+  throw new Error(grund+(hinweis?' ('+hinweis+')':''));
+}
+
 async function verlaufErmitteln(st){
   const pkte=(st.punkte||[]).map(punkt).filter(hatKoord).map(p=>[p.lat,p.lon]);
   if(pkte.length<2) throw new Error('Mindestens zwei Betriebspunkte mit Koordinate nötig');
-  let gesamt=[];
+
+  /* Alle Abschnitte gleichzeitig statt nacheinander */
+  const aufgaben=[];
   for(let i=1;i<pkte.length;i++){
-    if(meterAbstand(pkte[i-1],pkte[i])>80000)
-      throw new Error('Abschnitt zu lang — Zwischenbetriebspunkte erfassen');
-    let teil=null, grund='', versuch=0;
-    while(!teil && versuch<2){
-      versuch++;
-      meldung(`${st.name}: Abschnitt ${i} von ${pkte.length-1}${versuch>1?' — grösserer Ausschnitt':''} …`);
-      const elemente=await gleiseHolen(pkte[i-1], pkte[i], versuch===1?1:2.0);
-      if(!elemente.length){ grund='Keine Gleisdaten in diesem Bereich'; }
-      else {
-        const G=graphBauen(elemente);
-        const a=naechsterKnoten(G,pkte[i-1]), b=naechsterKnoten(G,pkte[i]);
-        if(a.d>1500 || b.d>1500) grund='Betriebspunkt liegt '+Math.round(Math.max(a.d,b.d))+' m vom nächsten Gleis — Koordinate prüfen';
-        else {
-          teil=kuerzesterWeg(G,a.k,b.k);
-          if(!teil) grund='Keine durchgehende Gleisverbindung gefunden';
-        }
-      }
-      if(!teil && versuch<2) await new Promise(r=>setTimeout(r,1300));
-    }
-    if(!teil) throw new Error(grund+' (Abschnitt '+i+')');
-    gesamt = gesamt.length ? gesamt.concat(teil.slice(1)) : teil;
-    if(i<pkte.length-1) await new Promise(r=>setTimeout(r,1800));
+    const A=pkte[i-1], B=pkte[i], nr=i;
+    aufgaben.push(()=>abschnittWeg(A,B,'Abschnitt '+nr));
   }
+  meldung(`${st.name}: ${aufgaben.length} Abschnitt(e) werden berechnet …`);
+  const teile=await gleichzeitig(aufgaben, 4);
+
+  const misslungen=teile.find(t=>!t.ok);
+  if(misslungen) throw new Error(misslungen.fehler);
+
+  let gesamt=[];
+  teile.forEach(t=>{ gesamt = gesamt.length ? gesamt.concat(t.wert.slice(1)) : t.wert; });
   return ausduennen(gesamt, 12).map(k=>[+k[0].toFixed(5), +k[1].toFixed(5)]);
 }
 
@@ -1047,7 +1154,7 @@ function trefferZeigen(liste, status){
     + (status?`<div style="padding:9px 13px;color:var(--stahl);font-size:13px;font-family:var(--mono)">${esc(status)}</div>`:'');
 }
 
-const BAHNEN=['SBB','BLS','SOB','zb Zentralbahn','RhB','MGB','TPF','AB Appenzeller Bahnen',
+const BAHNEN=['SBB','BLS','SOB','zb','RhB','MGB','TPF','AB Appenzeller Bahnen',
   'RBS','ASm','MOB','TMR','TRAVYS','WSB','SZU','Forchbahn','DB','ÖBB','SNCF','FS'];
 
 function bahnKuerzen(op){
@@ -1492,7 +1599,7 @@ function formularPunkt(id){
     <div class="hinweis">Anlagen sind gemeinsame Stammdaten und dienen zugleich als Betriebspunkte der Strecken.</div>
     ${p?'':`<label><span>Bahnhof suchen</span><input id="p-suche" placeholder="Name eingeben, z. B. Ausserberg" autocomplete="off"></label>
     <div class="vorschlaege" id="p-treffer" hidden></div>
-    <div class="hinweis">1243 amtliche Betriebspunkte von SBB und BLS sind fest hinterlegt — Suche nach Name oder Abkürzung, ohne Wartezeit.</div>`}
+    <div class="hinweis">1517 amtliche Betriebspunkte von SBB, BLS, SOB, Zentralbahn, RhB und MGB sind fest hinterlegt — Suche nach Name oder Abkürzung, ohne Wartezeit.</div>`}
     <datalist id="abkliste">${BP_LISTE.map(e=>`<option value="${esc(e.abk)}">${esc(e.name)}</option>`).join('')}</datalist>
     <div class="zweispaltig">
       <label><span>Abkürzung</span><input id="p-abk" list="abkliste" value="${esc(ENTWURF.abk)}" maxlength="8" placeholder="OL" style="font-family:var(--mono);text-transform:uppercase"></label>
@@ -1614,18 +1721,19 @@ const TATEN = {
     const offen=S.strecken.filter(st=>darfStamm(st) && !(Array.isArray(st.verlauf)&&st.verlauf.length>1)
       && (st.punkte||[]).map(punkt).filter(hatKoord).length>=2);
     if(!offen.length && !zuwenig.length){ meldung('Alle Strecken haben bereits einen Gleisverlauf'); return; }
-    let ok=0, nr=0; const probleme=zuwenig.map(st=>({name:st.name,
+    const probleme=zuwenig.map(st=>({name:st.name,
       grund:'Weniger als zwei Betriebspunkte mit Koordinate'}));
-    for(const st of offen){
-      nr++;
-      meldung(`Strecke ${nr} von ${offen.length}: ${st.name} …`);
+    let ok=0, fertig=0;
+    const auftraege=offen.map(st=>async()=>{
       try{
         const pfad=await verlaufErmitteln(st);
         const {error}=await db.from('strecke').update({verlauf:pfad}).eq('id',st.id);
         if(error) probleme.push({name:st.name, grund:error.message}); else ok++;
       }catch(e){ probleme.push({name:st.name, grund:(e&&e.message)||String(e)}); }
-      await new Promise(r=>setTimeout(r,2000));
-    }
+      fertig++;
+      meldung(`${fertig} von ${offen.length} Strecken verarbeitet …`);
+    });
+    await gleichzeitig(auftraege, 3);
     await alleLaden(); zeichnen();
     if(!probleme.length){ meldung(`${ok} Strecken auf die Gleise gelegt`); return; }
     meldung(`${ok} gelegt, ${probleme.length} offen`, true);
@@ -1904,7 +2012,8 @@ const TATEN = {
 };
 
 /* ============================================================
-   Amtliches Betriebspunktverzeichnis — SBB und BLS Netz AG
+   Amtliches Betriebspunktverzeichnis
+   SBB, BLS Netz AG, SOB, Zentralbahn, RhB und MGB.
    Quellen: atlas / Open Data-Plattform Mobilität Schweiz
    (Dienststellen v2, Stand 19.08.2026) und Perron-/Gleisübersicht
    BLS Netz AG, gültig ab 6. Juni 2026.
@@ -3152,7 +3261,281 @@ ZBR|Zihlbrücke|BLS
 ZELL|Zell LU|BLS
 ZO|Zollbrück|BLS
 ZOO|Crémines-Zoo|BLS
-ZW|Zweisimmen|BLS`;
+ZW|Zweisimmen|BLS
+ACK|Ackersand|MGB
+ACLA|Acla da Fontauna|MGB
+ADF|Alpnach Dorf|zb
+ADZ|Ardez|RhB
+AEG|Ägertli|zb
+ALD|Luzern Allmend/Messe|zb
+ALGR|Alp Grüm|RhB
+ALV|Alvaneu|RhB
+AND|Andermatt|MGB
+AROS|Arosa|RhB
+AST|Alpnachstad|zb
+AT|Altmatt|SOB
+ATOS|Aareschlucht Ost (Bahn)|zb
+BEBR|Bergün/Bravuogn|RhB
+BEDI|Bernina Diavolezza|RhB
+BEDR|Bedrettostollen|MGB
+BELA|Bernina Lagalb|RhB
+BEMG|Bettmeralp Talstation|MGB
+BESU|Bernina Suot|RhB
+BEV|Bever|RhB
+BGH|Burghalden|SOB
+BIB|Biberbrugg|SOB
+BIGG|Biberegg|SOB
+BIGO|Biel (Goms)|MGB
+BITS|Bitsch|MGB
+BLIZ|Blitzingen|MGB
+BONA|Bonaduz|RhB
+BRFL|Brunnenfluh|zb
+BRIO|Brusio|RhB
+BRMG|Brig Bahnhofplatz|MGB
+BRN|Brunnadern-Neckertal|SOB
+BRNI|Brunni|zb
+BRUE|Brünig-Hasliberg|zb
+BRW|Brienzwiler|zb
+BRWA|Bruggwaldtunnel (Abzw)|SOB
+BRZ|Brienz|zb
+BRZW|Brienz West|zb
+BUGN|Bugnei|MGB
+CADE|Cadera|RhB
+CAIO|Campascio|RhB
+CAMP|Campocologno|RhB
+CARO|Carolina|RhB
+CASR|Castrisch|RhB
+CAVA|Cavaglia|RhB
+CAZI|Cazis|RhB
+CDUE|Cavadürli|RhB
+CELE|Celerina|RhB
+CELS|Celerina Staz|RhB
+CHSA|Chur Altstadt|RhB
+CHWE|Chur West|RhB
+CHWI|Chur Wiesental|RhB
+CIN|Cinuos-chel-Brail|RhB
+CURT|Li Curt|RhB
+DAD|Davos Dorf|RhB
+DAF|Davos Frauenkirch|RhB
+DAGL|Davos Glaris|RhB
+DAL|Dallenwil|zb
+DALT|Davos Laret|RhB
+DAM|Davos Monstein|RhB
+DAV|Davos Platz|RhB
+DAW|Davos Wolfgang|RhB
+DE|Domat/Ems|RhB
+DEPS|Chur Depot Sand|RhB
+DG|Degersheim|SOB
+DGWE|Degersheim West (Abzw)|SOB
+DIEN|Dieni|MGB
+DIS|Disentis/Mustér|RhB
+EBG|Engelberg|zb
+EBGB|Engelberg Boden|zb
+EBLI|Ebligen|zb
+EIS|Einsiedeln|SOB
+EK|Ebnat-Kappel|SOB
+EMSW|Domat/Ems Werk|RhB
+EWMA|Ewil Maxon|zb
+EYHO|Eyholz|MGB
+FBG|Felsberg|RhB
+FBO|Fangboden|zb
+FID|Fideris|RhB
+FIE|Fiesch|MGB
+FIED|Fiesch Feriendorf|MGB
+FILI|Filisur|RhB
+FILN|Filisur Nord (Abzw)|RhB
+FRBS|Freienbach SOB|SOB
+FTAN|Ftan Baraigla|RhB
+FUER|Fürgangen-Bellwald Talstation|MGB
+FURN|Furna|RhB
+FUWI|Fuchsenwinkel|RhB
+GAM|Gamsensand|MGB
+GEMG|Kreuzungsstation Geren|MGB
+GES|Geschinen|MGB
+GI|Giswil|zb
+GIGR|Giswil Grossmatt|zb
+GIN|Giswil Nord|zb
+GLIS|Glisergrund|MGB
+GLUR|Gluringen|MGB
+GOEM|Göschenen MG Bahn|MGB
+GRAA|Grafenort Ausweiche|zb
+GRAF|Grafenort|zb
+GREN|Grengiols|MGB
+GRF|Grüenfeld|SOB
+GRUS|Grüsch|RhB
+GUA|Guarda|RhB
+GUEB|Gübsensee|SOB
+HAEW|Häggenschwil-Winden|SOB
+HALD|Haldenstein|RhB
+HE|Herisau|SOB
+HEBR|Herbriggen|MGB
+HGR|Haspelgrube|RhB
+HGW|Hergiswil NW|zb
+HOS|Hospental|MGB
+HUR|Hurden|SOB
+HW|Horw|zb
+HWS|Horw Süd (Spw)|zb
+IGIS|Igis|RhB
+ILZ|Ilanz|RhB
+INN|Innertkirchen Kraftwerk (Bahn)|zb
+INNP|Innertkirchen Grimseltor|zb
+INUN|Innertkirchen Unterwasser|zb
+IOBR|Interlaken Ost [Gleis 3-4]|zb
+JAZ|Jenaz|RhB
+KABO|Kaltenboden (Agl)|SOB
+KAEP|Chäppeli|zb
+KAI|Kaiserstuhl OW|zb
+KALP|Kalpetran|MGB
+KBOD|Kalter Boden|MGB
+KER|Kerns-Kägiswil|zb
+KIPF|Kipferwald|MGB
+KLO|Klosters Platz|RhB
+KLOD|Klosters Dorf|RhB
+KRM|Kriens Mattenhof|zb
+KRU|Krummenau|SOB
+KUEB|Küblis|RhB
+LAPU|La Punt Chamues-ch|RhB
+LAVI|Lavin|RhB
+LAWI|Langwies GR|RhB
+LAX|Lax|MGB
+LITZ|Litzirüti|RhB
+LQRI|Landquart Ried|RhB
+LSG|Lichtensteig|SOB
+LUCA|Lüen-Castiel|RhB
+LUN|Lungern|zb
+MADU|Madulain|RhB
+MAGZ|Eidg. Magazine|SOB
+MALA|Malans GR|RhB
+MASD|Mattsand|MGB
+MATT|Hergiswil Matt|zb
+MIRA|Miralago|RhB
+MOEL|Mörel|MGB
+MOG|Mogelsberg|SOB
+MOTA|Morteratsch|RhB
+MOTU|Mumpé Tujetsch|MGB
+MR|Meiringen|zb
+MRAB|Meiringen Alpbach|zb
+MROS|Täsch Monte Rosa|MGB
+MRSS|Aareschlucht West|zb
+MUDA|Mundaditsch (Abzw)|RhB
+MUET|Münster VS|MGB
+MUO|Muolen|SOB
+MUOT|Muot|RhB
+NAET|Nätschen|MGB
+NBG|Neuberg|SOB
+NK|Neukirch-Egnach|SOB
+NL|Nesslau-Neu St. Johann|SOB
+NR|Niederried|zb
+NRRB|Niederrickenbach Station|zb
+NWAL|Niederwald|MGB
+OAB|Oberried am Brienzersee|zb
+OBAL|Oberalppass|MGB
+OBGE|Obergesteln|MGB
+OBW|Oberwald|MGB
+OSBE|Ospizio Bernina|RhB
+PEI|Peist|RhB
+PORE|Pontresina|RhB
+POS|Poschiavo|RhB
+PRED|Preda|RhB
+PREN|Preda Nord|RhB
+PRES|Le Prese|RhB
+PTM|Punt Muragl|RhB
+PTMS|Punt Muragl Staz|RhB
+RAND|Randa|MGB
+RASU|Rabius-Surrein|RhB
+RDM|Riedmatt SZ|SOB
+REAL|Realp|MGB
+RECK|Reckingen VS|MGB
+REIF|Reichenau Farsch (Abzw)|RhB
+REIT|Reichenau-Tamins|RhB
+RHAE|Rhäzüns|RhB
+RIN|Ringgenberg|zb
+ROBG|Roggwil-Berg|SOB
+RORE|Rodels-Realta|RhB
+ROTD|Kreuzungsstation Rotondo|MGB
+ROTH|Rothenbrunnen|RhB
+RTT|Rothenthurm|SOB
+RUER|Rueras|MGB
+RUEU|Rueun|RhB
+SAAS|Saas im Prättigau|RhB
+SACH|Sachseln|zb
+SAGL|Sagliains|RhB
+SAM|Samstagern|SOB
+SAME|Samedan|RhB
+SAR|Sarnen|zb
+SASS|Sasslatsch (Abzw)|RhB
+SAT|Sattel-Aegeri|SOB
+SATT|Sattel|SOB
+SCAN|S-chanf|RhB
+SCEN|Schwiedernen|MGB
+SCH|Schachen (Herisau)|SOB
+SCHI|Schindellegi-Feusisberg|SOB
+SCRS|Schiers|RhB
+SCTA|Scuol-Tarasp|RhB
+SED|Sedrun|MGB
+SEEV|Seewis-Pardisla|RhB
+SEG|Segnas|MGB
+SELF|Klosters Selfranga|RhB
+SELS|Selfranga Süd|RhB
+SERN|Serneus|RhB
+SEVE|Sefinot|MGB
+SGFN|St. Gallen St. Fiden Nord|SOB
+SGHA|St. Gallen Haggen|SOB
+SILS|Sils im Domleschg (Abzw)|RhB
+SLAN|Schiers Schlangenboden (Abzw)|RhB
+SMOR|St. Moritz|RhB
+SNK|St. Niklaus VS|MGB
+SNOR|Sagliains Nord|RhB
+SOLI|Solis|RhB
+SPIN|Spinas|RhB
+SRND|Sarnen Nord|zb
+SSTA|Stansstad|zb
+STAK|Stablini|RhB
+STAN|Stans|zb
+STAS|Stalden-Saas|MGB
+STB|Steinebrunn|SOB
+STBG|Steinerberg|SOB
+STEK|Steinlekehr|MGB
+STF|Staldifeld (Ausw)|zb
+STGL|Stugl/Stuls|RhB
+STPM|St. Peter-Molinis|RhB
+SUCU|Sumvitg-Cumpadials|RhB
+SURA|Surava|RhB
+SURO|Surovas|RhB
+SUS|Susch|RhB
+TABR|Tavanasa-Breil/Brigels|RhB
+TAES|Täsch|MGB
+TASS|Täschsand|MGB
+THS|Thusis|RhB
+TICA|Tiefencastel|RhB
+TIR|Tirano|RhB
+TRIN|Trin|RhB
+TRIS|Trimmis|RhB
+TRMB|Trimmis (Abzw)|RhB
+TRUN|Trun|RhB
+TSPA|Tscheppa|MGB
+TSSE|Tschamut-Selva|MGB
+ULR|Ulrichen|MGB
+USAX|Untersax|RhB
+UVAZ|Untervaz-Trimmis|RhB
+VASA|Valendas-Sagogn|RhB
+VESA|Versam-Safien|RhB
+VIMG|Visp MGB-bvz|MGB
+VISA|Vispesand|MGB
+VNOR|Vereina Nord|RhB
+VSUD|Vereina Süd|RhB
+WA|Wattwil|SOB
+WAVU|Waltensburg/Vuorz|RhB
+WIES|Davos Wiesen|RhB
+WILN|Wilen bei Wollerau|SOB
+WIT|Wittenbach|SOB
+WOL|Wollerau|SOB
+WOS|Wolfenschiessen|zb
+ZALT|Zizers Altlöser|RhB
+ZERM|Zermatt|MGB
+ZEZ|Zernez|RhB
+ZIZ|Zizers|RhB
+ZUOZ|Zuoz|RhB`;
 
 const BP_LISTE = BP_ROH.split('\n').map(z=>{
   const [abk,name,bahn]=z.split('|');
